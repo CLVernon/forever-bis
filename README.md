@@ -2,6 +2,8 @@
 
 A Best-in-Slot goal tracker for **World of Warcraft: Forever**.
 
+**Live app:** <https://clvernon.github.io/forever-bis/>
+
 Set up your characters, give each one any number of **loadouts** (e.g. Enhancement /
 Elemental / Restoration), define global **phases** (e.g. Pre Raid, Tier 1), and add
 goal items to every equipment slot per phase. Mark items as obtained and keep notes
