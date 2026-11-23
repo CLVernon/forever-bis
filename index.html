@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forever BIS</title>
+<meta name="description" content="Best-in-Slot goal tracker for World of Warcraft: Forever — characters, loadouts, item goals and notes.">
+<meta name="theme-color" content="#16120c">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚔️</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+<script>window.whTooltips = { colorLinks: false, iconizeLinks: false, renameLinks: false, hide: { sellprice: true } };</script>
+<script defer src="https://wow.zamimg.com/js/tooltips.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-icon">⚔️</span>
+    <div class="brand-text">
+      <h1>Forever BIS</h1>
+      <span class="brand-sub">Best-in-Slot tracker</span>
+    </div>
+  </div>
+  <div class="topbar-controls">
+    <select id="charSelect" title="Switch character"></select>
+    <button id="newCharBtn" class="btn" title="Create a new character">+ Character</button>
+    <div class="menu-wrap">
+      <button id="menuBtn" class="btn btn-ghost" title="More actions">⋯</button>
+      <div id="menu" class="menu" hidden>
+        <button data-menu="edit-char">Edit character</button>
+        <button data-menu="delete-char" class="danger">Delete character</button>
+        <hr>
+        <button data-menu="export">Export backup (JSON)</button>
+        <button data-menu="import">Import backup…</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main id="app"></main>
+
+<footer class="footer">
+  <p>Item data &amp; tooltips by <a href="https://www.wowhead.com/forever" target="_blank" rel="noopener">Wowhead</a>.
+  All data is stored locally in your browser — use <em>Export backup</em> to keep a copy.</p>
+</footer>
+
+<!-- Character create/edit -->
+<dialog id="charDialog">
+  <form method="dialog" id="charForm">
+    <h2 id="charDialogTitle">New character</h2>
+    <label>Name
+      <input name="name" required maxlength="40" placeholder="Psyala Stormbrew" autocomplete="off">
+    </label>
+    <label>Race / description <span class="hint">(optional)</span>
+      <input name="race" maxlength="60" placeholder="Dwarf" autocomplete="off">
+    </label>
+    <label>Class
+      <select name="cls"></select>
+    </label>
+    <label>Game version <span class="hint">(controls which Wowhead database is used)</span>
+      <select name="version"></select>
+    </label>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+      <button type="submit" class="btn btn-primary" value="ok">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Loadout create/rename -->
+<dialog id="loadoutDialog">
+  <form method="dialog" id="loadoutForm">
+    <h2 id="loadoutDialogTitle">New loadout</h2>
+    <label>Name
+      <input name="name" required maxlength="40" placeholder="Enhancement" autocomplete="off">
+    </label>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+      <button type="submit" class="btn btn-primary" value="ok">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Add item -->
+<dialog id="addItemDialog">
+  <form id="addItemForm">
+    <h2>Add item — <span id="addItemSlotName"></span></h2>
+    <label>Item name, ID, or Wowhead link
+      <input id="addItemInput" required placeholder="e.g. Nightfall, 19169, or a wowhead.com link" autocomplete="off">
+    </label>
+    <p class="hint" id="addItemHint">
+      Search by name, or paste an item link / ID from
+      <a id="addItemWowheadLink" href="https://www.wowhead.com/forever/items" target="_blank" rel="noopener">Wowhead</a>.
+    </p>
+    <div id="addItemStatus" class="add-status" hidden></div>
+    <div id="addItemResults" class="search-results"></div>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-ghost" data-close>Close</button>
+      <button type="submit" class="btn btn-primary">Search / Add</button>
+    </div>
+  </form>
+</dialog>
+
+<input type="file" id="importFile" accept="application/json,.json" hidden>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

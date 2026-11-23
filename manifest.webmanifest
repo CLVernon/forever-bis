@@ -1,0 +1,16 @@
+{
+  "name": "Forever BIS",
+  "short_name": "Forever BIS",
+  "description": "Best-in-Slot goal tracker for World of Warcraft: Forever",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#16120c",
+  "theme_color": "#16120c",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='18' fill='%2316120c'/><text x='50' y='72' font-size='60' text-anchor='middle'>⚔️</text></svg>",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
