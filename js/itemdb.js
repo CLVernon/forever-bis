@@ -193,10 +193,8 @@ export const SLOT_ITEM_TYPES = {
   waist: ['Waist'],
   legs: ['Legs'],
   feet: ['Feet'],
-  ring1: ['Finger'],
-  ring2: ['Finger'],
-  trinket1: ['Trinket'],
-  trinket2: ['Trinket'],
+  finger: ['Finger'],
+  trinket: ['Trinket'],
   mainhand: ['Main Hand', 'One-Hand', 'Two-Hand'],
   offhand: ['Off Hand', 'One-Hand', 'Held In Off-hand', 'Shield'],
   ranged: ['Ranged', 'Relic', 'Thrown'],
@@ -207,6 +205,50 @@ export function itemFitsSlot(dbItem, slotKey) {
   const allowed = SLOT_ITEM_TYPES[slotKey];
   if (!allowed || !dbItem) return true;
   return allowed.includes(dbItem.slot);
+}
+
+// The enchant "catalog" is mined from the item index itself: enchanting
+// formulas, head/legs arcanums, and the shoulder enchant items. The formula
+// item carries the enchant's tooltip and where to get it.
+const ENCHANT_PATTERNS = {
+  head: [/^(Lesser )?Arcanum of/i],
+  shoulder: [/^Zandalar Signet of/i, /^(Power|Might|Fortitude|Resilience) of the Scourge$/i],
+  neck: [/^Formula: Enchant Necklace -/i],
+  back: [/^Formula: Enchant Cloak -/i],
+  chest: [/^Formula: Enchant Chest -/i],
+  wrist: [/^Formula: Enchant Bracer -/i],
+  hands: [/^Formula: Enchant Gloves -/i],
+  legs: [/^(Lesser )?Arcanum of/i],
+  feet: [/^Formula: Enchant Boots -/i],
+  mainhand: [/^Formula: Enchant (2H )?Weapon -/i],
+  offhand: [/^Formula: Enchant (Shield|Off Hand|Weapon) -/i],
+};
+
+/** Whether a slot has a searchable enchant catalog (otherwise: free text only). */
+export function hasEnchantCatalog(slotKey) {
+  return Boolean(ENCHANT_PATTERNS[slotKey]);
+}
+
+/**
+ * Enchant suggestions for a slot. An empty query lists the whole catalog.
+ * Returns [{ id, name (display, "Formula: " stripped), q, src }].
+ */
+export function searchEnchants(slotKey, query = '', limit = 50) {
+  const patterns = ENCHANT_PATTERNS[slotKey];
+  if (!patterns || !itemIndex) return [];
+  const q = query.trim().toLowerCase();
+  const out = [];
+  const seen = new Set();
+  for (const item of itemIndex) {
+    if (!patterns.some((p) => p.test(item.name))) continue;
+    const name = item.name.replace(/^Formula: /i, '');
+    if (q && !name.toLowerCase().includes(q)) continue;
+    if (seen.has(name)) continue; // the game re-issues some under new ids
+    seen.add(name);
+    out.push({ id: item.id, name, q: item.q, src: item.src });
+  }
+  out.sort((a, b) => (b.q ?? 0) - (a.q ?? 0) || a.name.localeCompare(b.name));
+  return out.slice(0, limit);
 }
 
 /**

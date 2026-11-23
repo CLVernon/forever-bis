@@ -18,6 +18,7 @@ import {
 import {
   loadItemDb, searchItemDb, itemDbGet, itemDbReady, itemFitsSlot,
   loadSources, sourcesFor, sourcesReady,
+  searchEnchants, hasEnchantCatalog,
 } from './itemdb.js';
 
 import { encodeShare, decodeShare } from './share.js';
@@ -236,27 +237,57 @@ function slotsHtml(ch, lo, ph) {
   return `<section class="slots">${cards}</section>`;
 }
 
-function enchantHtml(lo, ph, slotKey, text) {
+function enchantHtml(lo, ph, slotKey, ench) {
   const ro = isReadOnly();
   const editing = openEnchants.has(`${lo.id}/${ph.id}/${slotKey}`);
+  const display = typeof ench === 'string' ? ench : ench?.name ?? '';
   if (editing && !ro) {
     return `
       <div class="enchant-line editing">
         <span class="enchant-star">✦</span>
         <input class="enchant-input" data-action="edit-enchant" data-slot="${slotKey}"
-          value="${esc(text ?? '')}" placeholder="Enchant — e.g. Crusader" maxlength="80">
+          data-initial="${esc(display)}"
+          value="${esc(display)}" placeholder="${hasEnchantCatalog(slotKey) ? 'Pick an enchant, or type your own' : 'Enchant — free text'}" maxlength="80">
+        <div class="enchant-sugs" data-slot="${slotKey}"></div>
       </div>`;
   }
-  if (text) {
+  if (display) {
+    const linked = typeof ench === 'object' && ench.id;
+    const label = linked
+      ? `<a class="enchant-text" href="${itemUrl(ench.id)}" target="_blank" rel="noopener"
+           data-wh-icon-size="small" style="color:${qColor(ench.q)}">${esc(display)}</a>`
+      : `<span class="enchant-text">${esc(display)}</span>`;
     return `
       <div class="enchant-line">
         <span class="enchant-star">✦</span>
-        <span class="enchant-text">${esc(text)}</span>
+        ${label}
         ${ro ? '' : `<button class="icon-btn" data-action="toggle-enchant" data-slot="${slotKey}" title="Edit enchant">✎</button>`}
       </div>`;
   }
   return ro ? '' : `
     <button class="enchant-add" data-action="toggle-enchant" data-slot="${slotKey}">+ enchant</button>`;
+}
+
+/** Fill the suggestion list under an enchant input from the item database. */
+function updateEnchantSugs(input) {
+  const box = input.parentElement.querySelector('.enchant-sugs');
+  if (!box) return;
+  const slotKey = input.dataset.slot;
+  if (!hasEnchantCatalog(slotKey)) { box.innerHTML = ''; return; }
+  if (!itemDbReady()) {
+    box.innerHTML = '<span class="hint">Loading enchant list…</span>';
+    loadItemDb().then(() => {
+      if (document.contains(input)) updateEnchantSugs(input);
+    }).catch(() => { box.innerHTML = ''; });
+    return;
+  }
+  const results = searchEnchants(slotKey, input.value);
+  box.innerHTML = results.slice(0, 10).map((r) => `
+    <button type="button" class="search-result enchant-sug" data-ench-id="${r.id}"
+      data-ench-name="${esc(r.name)}" data-ench-q="${r.q ?? ''}" data-slot="${slotKey}">
+      <span class="sr-main"><span style="color:${qColor(r.q)}">${esc(r.name)}</span></span>
+      ${r.src ? `<span class="sr-src">${esc(r.src)}</span>` : ''}
+    </button>`).join('');
 }
 
 function itemRowHtml(ch, lo, ph, slotKey, itemId, index, count) {
@@ -956,8 +987,32 @@ for (const dlg of [charDialog, nameDialog, addItemDialog, copyDialog, shareDialo
   });
 }
 
+// Keep the enchant input focused while clicking its suggestion list, so the
+// click lands before any blur-driven re-render.
+app.addEventListener('pointerdown', (e) => {
+  if (e.target.closest('.enchant-sugs')) e.preventDefault();
+});
+
 // Main app delegation
 app.addEventListener('click', (e) => {
+  // Enchant suggestion pick (database-linked, gets a tooltip).
+  const sug = e.target.closest('.enchant-sug');
+  if (sug) {
+    const ch = activeCharacter();
+    const lo = activeLoadout(ch);
+    const ph = activePhase();
+    if (lo && ph) {
+      setEnchant(lo, ph, sug.dataset.slot, {
+        id: sug.dataset.enchId,
+        name: sug.dataset.enchName,
+        q: sug.dataset.enchQ === '' ? null : Number(sug.dataset.enchQ),
+      });
+      openEnchants.delete(`${lo.id}/${ph.id}/${sug.dataset.slot}`);
+      renderAll();
+    }
+    return;
+  }
+
   const btn = e.target.closest('[data-action]');
   if (!btn || btn.matches('input,textarea')) return;
   const ro = isReadOnly();
@@ -1029,7 +1084,11 @@ app.addEventListener('click', (e) => {
       openEnchants.has(key) ? openEnchants.delete(key) : openEnchants.add(key);
       renderAll();
       if (openEnchants.has(key)) {
-        $(`.enchant-input[data-slot="${slot}"]`)?.focus();
+        const input = $(`.enchant-input[data-slot="${slot}"]`);
+        if (input) {
+          input.focus();
+          updateEnchantSugs(input);
+        }
       }
       break;
     }
@@ -1094,14 +1153,19 @@ app.addEventListener('input', (e) => {
     const lo = activeLoadout(ch);
     const ph = activePhase();
     if (lo && ph) setEnchant(lo, ph, el.dataset.slot, el.value);
+    updateEnchantSugs(el);
   }
 });
 
-// Close the enchant editor on Enter.
+// Close the enchant editor on Enter or Escape.
 app.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && e.target.dataset?.action === 'edit-enchant') {
+  if ((e.key === 'Enter' || e.key === 'Escape') && e.target.dataset?.action === 'edit-enchant') {
     e.preventDefault();
-    e.target.blur(); // triggers the change handler above
+    const ch = activeCharacter();
+    const lo = activeLoadout(ch);
+    const ph = activePhase();
+    if (lo && ph) openEnchants.delete(`${lo.id}/${ph.id}/${e.target.dataset.slot}`);
+    renderAll();
   }
 });
 

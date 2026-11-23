@@ -29,7 +29,9 @@ notes stay in sync across every loadout and phase that shares the item.
 - **Auto source info** — the drop/vendor/quest source is parsed from Wowhead's
   tooltip data and shown under each item, and drives the grouping above.
 - **Enchants per slot** — an optional enchant line on every slot, per loadout
-  and phase.
+  and phase, with the same autofill as items: pick from the slot's enchant
+  catalog (formulas, arcanums, Zandalar signets, Naxx shoulder enchants) and
+  get quality colors, source info and a Wowhead tooltip — or type free text.
 - **Copy forward & duplicate** — merge one phase's goals into another (current
   loadout or the whole character) and duplicate loadouts, so Tier 2 starts from
   Tier 1 instead of a blank page.

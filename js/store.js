@@ -11,10 +11,8 @@ export const SLOTS = [
   { key: 'waist',    label: 'Waist' },
   { key: 'legs',     label: 'Legs' },
   { key: 'feet',     label: 'Feet' },
-  { key: 'ring1',    label: 'Ring 1' },
-  { key: 'ring2',    label: 'Ring 2' },
-  { key: 'trinket1', label: 'Trinket 1' },
-  { key: 'trinket2', label: 'Trinket 2' },
+  { key: 'finger',   label: 'Rings' },
+  { key: 'trinket',  label: 'Trinkets' },
   { key: 'mainhand', label: 'Main Hand' },
   { key: 'offhand',  label: 'Off Hand' },
   { key: 'ranged',   label: 'Ranged / Relic' },
@@ -107,6 +105,40 @@ function defaultState() {
   };
 }
 
+/** Fold the old ring1/ring2, trinket1/trinket2 keys into finger/trinket. */
+function mergeLegacyPairs(map) {
+  const fold = (a, b, into) => {
+    if (!(a in map) && !(b in map)) return;
+    const va = map[a], vb = map[b];
+    if (Array.isArray(va) || Array.isArray(vb)) {
+      map[into] = [...(Array.isArray(map[into]) ? map[into] : []),
+        ...(Array.isArray(va) ? va : []), ...(Array.isArray(vb) ? vb : [])];
+    } else if (!(into in map)) {
+      map[into] = va ?? vb;
+    }
+    delete map[a];
+    delete map[b];
+  };
+  fold('ring1', 'ring2', 'finger');
+  fold('trinket1', 'trinket2', 'trinket');
+}
+
+/**
+ * An enchant is either free text (string) or a database-linked pick
+ * ({ id, name, q }) that gets a Wowhead tooltip. Returns null for empty.
+ */
+function normalizeEnchant(v) {
+  if (typeof v === 'string') return v.trim() || null;
+  if (v && typeof v === 'object' && typeof v.name === 'string' && v.name.trim()) {
+    return {
+      id: v.id != null ? String(v.id) : null,
+      name: v.name.trim(),
+      q: typeof v.q === 'number' ? v.q : null,
+    };
+  }
+  return null;
+}
+
 function normalize(s) {
   if (!s || typeof s !== 'object' || !Array.isArray(s.characters)) return defaultState();
   s.phases = Array.isArray(s.phases)
@@ -143,19 +175,22 @@ function normalize(s) {
       const cleanEnchants = {};
       for (const p of s.phases) {
         const src = lo.phases[p.id];
+        if (src && typeof src === 'object') mergeLegacyPairs(src);
         const slots = emptySlots();
         for (const sl of SLOTS) {
           const arr = src && Array.isArray(src[sl.key]) ? src[sl.key] : [];
-          slots[sl.key] = arr
+          slots[sl.key] = [...new Set(arr
             .filter((id) => typeof id === 'string' || typeof id === 'number')
-            .map(String);
+            .map(String))];
         }
         cleanSlots[p.id] = slots;
         const esrc = lo.enchants[p.id];
         const m = {};
         if (esrc && typeof esrc === 'object') {
+          mergeLegacyPairs(esrc);
           for (const sl of SLOTS) {
-            if (typeof esrc[sl.key] === 'string' && esrc[sl.key].trim()) m[sl.key] = esrc[sl.key];
+            const v = normalizeEnchant(esrc[sl.key]);
+            if (v) m[sl.key] = v;
           }
         }
         cleanEnchants[p.id] = m;
@@ -314,10 +349,11 @@ export function duplicateLoadout(ch, lo) {
   return copy;
 }
 
-export function setEnchant(loadout, phase, slotKey, text) {
+/** `value` is free text (string) or a database pick ({ id, name, q }). */
+export function setEnchant(loadout, phase, slotKey, value) {
   const m = enchantsOf(loadout, phase);
-  const t = text.trim();
-  if (t) m[slotKey] = t;
+  const v = normalizeEnchant(value);
+  if (v) m[slotKey] = v;
   else delete m[slotKey];
   save();
 }

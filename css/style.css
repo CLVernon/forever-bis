@@ -435,6 +435,18 @@ select:focus, input:focus, textarea:focus {
   border-top: 1px dashed #2d2618;
   font-size: 13px;
 }
+.enchant-line.editing { flex-wrap: wrap; position: relative; }
+.enchant-sugs {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+  max-height: 220px;
+  overflow: auto;
+}
+a.enchant-text { text-decoration: none; }
+a.enchant-text:hover { text-decoration: underline; }
 .enchant-star { color: var(--gold); }
 .enchant-text { color: #cfe8c0; }
 .enchant-input {
