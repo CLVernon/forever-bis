@@ -1,0 +1,40 @@
+name: Refresh item database
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 5 * * 1' # weekly, Monday 05:23 UTC
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch community database (wow-forever-kb gh-pages)
+        run: git clone --depth 1 --branch gh-pages https://github.com/gBlaku/wow-forever-kb /tmp/kb
+
+      - name: Build slim index
+        run: python3 scripts/build_itemdb.py /tmp/kb/api/items.json /tmp/kb/api/meta.json data/items.json
+
+      - name: Commit and redeploy if changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- data/items.json; then
+            echo "Item database unchanged."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/items.json
+          git commit -m "Refresh item database"
+          git push
+          # Pushes made with GITHUB_TOKEN do not trigger push workflows,
+          # so kick the Pages deploy explicitly.
+          gh workflow run pages.yml --ref main

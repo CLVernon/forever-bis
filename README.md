@@ -67,9 +67,16 @@ ES modules load.)
 | --- | --- |
 | `index.html` | App shell and dialogs |
 | `js/store.js` | Data model (phases → loadouts → slots), localStorage persistence, game constants |
-| `js/wowhead.js` | Wowhead URLs, tooltip-API fetch, source parsing, name search, input parsing |
+| `js/wowhead.js` | Wowhead URLs, tooltip-API fetch, source parsing, input parsing |
+| `js/itemdb.js` | Item-search index: same-origin `data/items.json`, fallbacks, IndexedDB cache |
 | `js/share.js` | Share-link encoding/decoding (deflate + base64url in the URL hash) |
 | `js/app.js` | Rendering (slots / needed / overview views) and event handling |
+| `data/items.json` | Slim item index (id, name, quality, slot, source) the search runs on |
+| `scripts/build_itemdb.py` | Regenerates `data/items.json` from the community database |
+| `.github/workflows/itemdb.yml` | Weekly refresh of `data/items.json` (also runnable manually) |
+
+Item search data comes from [wow-forever-kb](https://github.com/gBlaku/wow-forever-kb),
+a community database generated daily from the game client's own data tables.
 | `css/style.css` | Theme and layout |
 
 Item data and tooltips are provided by [Wowhead](https://www.wowhead.com/forever).

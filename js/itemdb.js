@@ -1,15 +1,16 @@
 // Local item search database.
 //
-// Wowhead's name-search endpoint blocks cross-origin requests, so instead we
-// load the community WoW Forever item database (built daily from the game
-// client's own data and served CORS-enabled from GitHub Pages):
-//   https://gblaku.github.io/wow-forever-kb/
-// The slimmed index is cached in IndexedDB keyed by game build, so the
-// download (one to a few MB) happens once per game patch, and searches are
-// instant and fully offline afterwards.
+// Wowhead's name-search endpoint blocks cross-origin requests, so search runs
+// over a local index instead. The index is built from the community WoW
+// Forever database (https://github.com/gBlaku/wow-forever-kb, generated daily
+// from the game client's own data tables) by scripts/build_itemdb.py and
+// shipped with this site at data/items.json (~2MB, ~400KB over the wire), so
+// loading it is a same-origin fetch with no CORS exposure. The kb site itself
+// is kept as a fallback source, and the last good index is cached in
+// IndexedDB so search still works offline.
 
+const LOCAL_URL = 'data/items.json';
 const KB_BASE = 'https://gblaku.github.io/wow-forever-kb/';
-export const KB_HOME = KB_BASE;
 
 let itemIndex = null;   // [{ id, name, q, slot, src }]
 let loadPromise = null;
@@ -50,33 +51,33 @@ export function itemDbReady() {
   return itemIndex !== null;
 }
 
-/**
- * Load (or reuse) the item index. Safe to call repeatedly; concurrent calls
- * share one download. Throws when the database cannot be fetched.
- */
-export function loadItemDb(onStatus) {
-  if (itemIndex) return Promise.resolve(itemIndex);
-  if (loadPromise) return loadPromise;
-  loadPromise = (async () => {
-    let build = null;
-    try {
-      const meta = await (await fetch(`${KB_BASE}api/meta.json`)).json();
-      build = meta?.build ?? null;
-    } catch { /* offline or blocked; try the cache below */ }
+/** Slim same-origin index: { build, fields, items: [[id, name, quality, slot, source], …] }. */
+async function fetchLocal() {
+  const res = await fetch(LOCAL_URL);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  if (!Array.isArray(data?.items)) throw new Error('Bad index');
+  return {
+    build: data.build ?? 'unknown',
+    items: data.items.map(([id, name, q, slot, src]) => ({
+      id: String(id),
+      name: String(name ?? ''),
+      q: typeof q === 'number' ? q : null,
+      slot: slot || '',
+      src: src || '',
+    })).filter((i) => i.name),
+  };
+}
 
-    let cached = null;
-    try { cached = await idbGet('itemdb'); } catch { /* no IndexedDB */ }
-    if (cached?.items?.length && (build === null || cached.build === build)) {
-      itemIndex = cached.items;
-      return itemIndex;
-    }
-    if (build === null && !cached) throw new Error('Item database unreachable');
-
-    onStatus?.('Downloading the item database (one-time, a few MB)…');
-    const res = await fetch(`${KB_BASE}api/items.json`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const raw = await res.json();
-    itemIndex = raw
+/** Fallback: the community database site (12MB of full item objects). */
+async function fetchRemote(onStatus) {
+  onStatus?.('Downloading the item database (one-time, a few MB)…');
+  const res = await fetch(`${KB_BASE}api/items.json`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const raw = await res.json();
+  return {
+    build: 'remote',
+    items: raw
       .filter((i) => i && i.id != null && i.name)
       .map((i) => ({
         id: String(i.id),
@@ -84,8 +85,36 @@ export function loadItemDb(onStatus) {
         q: typeof i.quality === 'number' ? i.quality : null,
         slot: i.slot || '',
         src: (i.source_summary || '').slice(0, 160),
-      }));
-    try { await idbSet('itemdb', { build: build ?? 'unknown', items: itemIndex }); } catch { /* cache is best-effort */ }
+      })),
+  };
+}
+
+/**
+ * Load (or reuse) the item index: the site's own data/items.json first, the
+ * community site as fallback, then the last good IndexedDB copy for offline.
+ * Safe to call repeatedly; concurrent calls share one load. Throws when no
+ * source is available.
+ */
+export function loadItemDb(onStatus) {
+  if (itemIndex) return Promise.resolve(itemIndex);
+  if (loadPromise) return loadPromise;
+  loadPromise = (async () => {
+    let data = null;
+    try { data = await fetchLocal(); } catch { /* fall through */ }
+    if (!data) {
+      try { data = await fetchRemote(onStatus); } catch { /* fall through */ }
+    }
+    if (!data) {
+      let cached = null;
+      try { cached = await idbGet('itemdb'); } catch { /* no IndexedDB */ }
+      if (cached?.items?.length) {
+        itemIndex = cached.items;
+        return itemIndex;
+      }
+      throw new Error('Item database unreachable');
+    }
+    itemIndex = data.items;
+    try { await idbSet('itemdb', data); } catch { /* cache is best-effort */ }
     return itemIndex;
   })();
   loadPromise.catch(() => { loadPromise = null; }); // allow retry after failure
