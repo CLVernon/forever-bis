@@ -428,9 +428,19 @@ export function placesUsingItem(ch, itemId, exceptLoadoutId, exceptPhaseId) {
 
 // ---- Aggregations ----------------------------------------------------------
 
+// How many of a slot's items are worn at once: a worse-ranked item is only
+// superseded once this many better-ranked ones are obtained.
+const SLOT_CAPACITY = { finger: 2, trinket: 2 };
+
 /**
- * Unobtained items of a character for a phase, across all loadouts (or one),
- * annotated with the slots and loadouts that want them.
+ * Items of a character still worth chasing for a phase, across all loadouts
+ * (or one), annotated with the slots and loadouts that want them.
+ *
+ * Slot lists are priority-ordered (top = BIS), so an unobtained item only
+ * counts as needed while fewer than the slot's capacity of better-ranked
+ * items are obtained — once you have Helm 2, Helms 3 and 4 are superseded
+ * and drop out, while Helm 1 remains an upgrade.
+ *
  * Returns [{ item, slots: [label], loadouts: [name] }].
  */
 export function neededItems(ch, phase, loadoutId = null) {
@@ -440,9 +450,13 @@ export function neededItems(ch, phase, loadoutId = null) {
     const slots = lo.phases[phase.id];
     if (!slots) continue;
     for (const s of SLOTS) {
+      const capacity = SLOT_CAPACITY[s.key] ?? 1;
+      let obtainedAbove = 0;
       for (const id of slots[s.key]) {
         const item = ch.items[id];
-        if (!item || item.obtained) continue;
+        if (!item) continue;
+        if (item.obtained) { obtainedAbove++; continue; }
+        if (obtainedAbove >= capacity) continue; // superseded by better items you have
         let entry = map.get(id);
         if (!entry) {
           entry = { item, slots: new Set(), loadouts: new Set() };
