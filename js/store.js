@@ -13,6 +13,7 @@ export const SLOTS = [
   { key: 'feet',     label: 'Feet' },
   { key: 'finger',   label: 'Rings' },
   { key: 'trinket',  label: 'Trinkets' },
+  { key: 'twohand',  label: 'Two Hand' },
   { key: 'mainhand', label: 'Main Hand' },
   { key: 'offhand',  label: 'Off Hand' },
   { key: 'ranged',   label: 'Ranged / Relic' },

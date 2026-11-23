@@ -195,7 +195,8 @@ export const SLOT_ITEM_TYPES = {
   feet: ['Feet'],
   finger: ['Finger'],
   trinket: ['Trinket'],
-  mainhand: ['Main Hand', 'One-Hand', 'Two-Hand'],
+  twohand: ['Two-Hand'],
+  mainhand: ['Main Hand', 'One-Hand'],
   offhand: ['Off Hand', 'One-Hand', 'Held In Off-hand', 'Shield'],
   ranged: ['Ranged', 'Relic', 'Thrown'],
 };
@@ -220,7 +221,8 @@ const ENCHANT_PATTERNS = {
   hands: [/^Formula: Enchant Gloves -/i],
   legs: [/^(Lesser )?Arcanum of/i],
   feet: [/^Formula: Enchant Boots -/i],
-  mainhand: [/^Formula: Enchant (2H )?Weapon -/i],
+  twohand: [/^Formula: Enchant (2H )?Weapon -/i],
+  mainhand: [/^Formula: Enchant Weapon -/i],
   offhand: [/^Formula: Enchant (Shield|Off Hand|Weapon) -/i],
 };
 
