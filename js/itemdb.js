@@ -126,6 +126,59 @@ export function itemDbGet(id) {
   return itemIndex?.find((i) => i.id === String(id)) ?? null;
 }
 
+// ---- Item sources (planner data) --------------------------------------------
+
+const SOURCES_URL = 'data/sources.json';
+let sourceMap = null;     // Map<itemId, [{ kind, name, zone, chance, extra }]>
+let sourcesPromise = null;
+
+export function sourcesReady() {
+  return sourceMap !== null;
+}
+
+/**
+ * Load the planner's source index (same-origin, IndexedDB copy as offline
+ * fallback). Lazy — only the planner view needs it. Throws when unreachable.
+ */
+export function loadSources() {
+  if (sourceMap) return Promise.resolve(sourceMap);
+  if (sourcesPromise) return sourcesPromise;
+  sourcesPromise = (async () => {
+    let data = null;
+    try {
+      const res = await fetch(SOURCES_URL);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      data = await res.json();
+      if (!Array.isArray(data?.rows)) throw new Error('Bad index');
+      try { await idbSet('sourcedb', data); } catch { /* cache is best-effort */ }
+    } catch {
+      try { data = await idbGet('sourcedb'); } catch { /* no IndexedDB */ }
+    }
+    if (!Array.isArray(data?.rows)) throw new Error('Source data unreachable');
+    sourceMap = new Map();
+    for (const [item, kind, name, zone, chance, extra] of data.rows) {
+      const id = String(item);
+      let arr = sourceMap.get(id);
+      if (!arr) sourceMap.set(id, (arr = []));
+      arr.push({
+        kind: kind || '',
+        name: name || '',
+        zone: zone || '',
+        chance: typeof chance === 'number' ? chance : null,
+        extra: extra || '',
+      });
+    }
+    return sourceMap;
+  })();
+  sourcesPromise.catch(() => { sourcesPromise = null; }); // allow retry
+  return sourcesPromise;
+}
+
+/** All known sources of one item (empty until loadSources resolves). */
+export function sourcesFor(id) {
+  return sourceMap?.get(String(id)) ?? [];
+}
+
 // ---- Search ----------------------------------------------------------------
 
 /** Which of the database's item slots fit each of the app's equipment slots. */

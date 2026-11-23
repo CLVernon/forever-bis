@@ -15,7 +15,10 @@ import {
   itemUrl, searchUrl, iconUrl, fetchItem, parseItemInput,
 } from './wowhead.js';
 
-import { loadItemDb, searchItemDb, itemDbGet, itemDbReady, itemFitsSlot } from './itemdb.js';
+import {
+  loadItemDb, searchItemDb, itemDbGet, itemDbReady, itemFitsSlot,
+  loadSources, sourcesFor, sourcesReady,
+} from './itemdb.js';
 
 import { encodeShare, decodeShare } from './share.js';
 
@@ -37,6 +40,7 @@ const openNotes = new Set();
 const openEnchants = new Set();
 let view = 'slots'; // slots | needed | overview
 let neededAllLoadouts = true;
+let sourcesFailed = false; // planner data unavailable -> flat grouping fallback
 
 // ---- Rendering ----------------------------------------------------------
 
@@ -172,7 +176,7 @@ function viewSwitchHtml() {
   return `
     <div class="view-switch">
       ${btn('slots', 'Gear slots')}
-      ${btn('needed', 'Still needed')}
+      ${btn('needed', 'Planner')}
       ${btn('overview', 'All characters')}
       ${view === 'slots' ? `
         <label class="hide-obtained" title="Hide obtained items in the slot lists">
@@ -298,23 +302,101 @@ function itemRowHtml(ch, lo, ph, slotKey, itemId, index, count) {
 
 // ---- Still-needed view ------------------------------------------------------
 
-function neededHtml(ch, lo, ph) {
+function neededItemRowHtml(entry, chanceLabel) {
   const ro = isReadOnly();
+  const { item, slots, loadouts } = entry;
+  return `
+    <div class="item-row needed-row">
+      <div class="item-main">
+        <label class="obtain" title="Mark as obtained">
+          <input type="checkbox" data-action="toggle-obtained" data-item="${item.id}" ${ro ? 'disabled' : ''}>
+          <span class="obtain-box"></span>
+        </label>
+        <a class="item-link" href="${itemUrl(item.id)}" target="_blank" rel="noopener" data-wh-icon-size="medium">
+          <img class="item-icon" src="${iconUrl(item.icon)}" alt="" loading="lazy">
+          <span class="item-name" style="color:${qColor(item.quality)}">${esc(item.name)}</span>
+        </a>
+        ${chanceLabel ? `<span class="chance-chip">${esc(chanceLabel)}</span>` : ''}
+        <span class="needed-meta">${esc(slots.join(', '))}${neededAllLoadouts ? ` — ${esc(loadouts.join(', '))}` : ''}</span>
+      </div>
+      ${item.note ? `<div class="item-source note-static">🗒 ${esc(item.note)}</div>` : ''}
+    </div>`;
+}
+
+/**
+ * Group needed entries for the planner: dungeon/raid/zone sections with the
+ * boss (or quest/vendor/recipe) nested inside, so one glance answers "which
+ * instance gives me the most upgrades?".
+ */
+function plannerGroups(entries) {
+  const groups = new Map(); // title -> { title, itemIds:Set, subs: Map<label, [{entry, chance, more}]> }
+  const put = (title, sub, entry, chance = null, more = 0) => {
+    let g = groups.get(title);
+    if (!g) groups.set(title, (g = { title, itemIds: new Set(), subs: new Map() }));
+    g.itemIds.add(entry.item.id);
+    let rows = g.subs.get(sub);
+    if (!rows) g.subs.set(sub, (rows = []));
+    rows.push({ entry, chance, more });
+  };
+
+  for (const entry of entries) {
+    const srcs = sourcesFor(entry.item.id);
+    if (!srcs.length) {
+      put('Other / unknown', entry.item.source || 'Unknown source', entry);
+      continue;
+    }
+    const byKind = {};
+    for (const s of srcs) (byKind[s.kind] ??= []).push(s);
+
+    // Drops: one row per zone, under the best-chance dropper, with a
+    // "+N more" hint when several bosses/mobs in the zone drop it.
+    const byZone = new Map();
+    for (const s of byKind.drop ?? []) {
+      const z = s.zone || 'World drops';
+      const cur = byZone.get(z);
+      if (!cur) byZone.set(z, { best: s, count: 1 });
+      else {
+        cur.count++;
+        if ((s.chance ?? 0) > (cur.best.chance ?? 0)) cur.best = s;
+      }
+    }
+    for (const [zone, { best, count }] of byZone) {
+      const sub = best.name + (best.extra && !/creatures/.test(best.extra) ? ` (${best.extra})` : '');
+      put(zone, sub, entry, best.chance, count - 1);
+    }
+    for (const s of (byKind.object ?? []).slice(0, 3)) {
+      put(s.zone || 'Chests & gathering', `${s.name} (chest/object)`, entry, s.chance);
+    }
+    for (const s of (byKind.container ?? []).slice(0, 2)) {
+      put('Containers', s.name, entry, s.chance);
+    }
+    for (const s of byKind.quest ?? []) {
+      put('Quests', `${s.name}${s.zone ? ` — ${s.zone}` : ''}${s.extra ? ` (${s.extra})` : ''}`, entry);
+    }
+    for (const s of byKind.crafted ?? []) {
+      put('Crafted', s.name, entry);
+    }
+    const vendors = byKind.vendor ?? [];
+    if (vendors.length > 2) {
+      put('Vendors', `${vendors.length} vendors`, entry);
+    } else {
+      for (const s of vendors) {
+        put('Vendors', `${s.name}${s.zone ? ` — ${s.zone}` : ''}`, entry);
+      }
+    }
+  }
+
+  const SINK = ['Vendors', 'Containers', 'Other / unknown'];
+  return [...groups.values()].sort((a, b) => {
+    const sa = SINK.indexOf(a.title), sb = SINK.indexOf(b.title);
+    if ((sa !== -1) !== (sb !== -1)) return sa !== -1 ? 1 : -1;
+    return b.itemIds.size - a.itemIds.size || a.title.localeCompare(b.title);
+  });
+}
+
+function neededHtml(ch, lo, ph) {
   const scopeLoadout = neededAllLoadouts ? null : lo.id;
   const entries = neededItems(ch, ph, scopeLoadout);
-
-  // Group by source.
-  const groups = new Map();
-  for (const e of entries) {
-    const key = e.item.source || '❓ Unknown source';
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(e);
-  }
-  const sorted = [...groups.entries()].sort((a, b) => {
-    const ua = a[0].startsWith('❓'), ub = b[0].startsWith('❓');
-    if (ua !== ub) return ua ? 1 : -1;
-    return a[0].localeCompare(b[0]);
-  });
 
   const scopeToggle = `
     <label class="hide-obtained">
@@ -330,25 +412,50 @@ function neededHtml(ch, lo, ph) {
       </section>`;
   }
 
-  const groupHtml = sorted.map(([source, list]) => `
-    <article class="needed-group">
-      <h4 class="needed-source">${esc(source)} <span class="hint">(${list.length})</span></h4>
-      ${list.map(({ item, slots, loadouts }) => `
-        <div class="item-row needed-row">
-          <div class="item-main">
-            <label class="obtain" title="Mark as obtained">
-              <input type="checkbox" data-action="toggle-obtained" data-item="${item.id}" ${ro ? 'disabled' : ''}>
-              <span class="obtain-box"></span>
-            </label>
-            <a class="item-link" href="${itemUrl(item.id)}" target="_blank" rel="noopener" data-wh-icon-size="medium">
-              <img class="item-icon" src="${iconUrl(item.icon)}" alt="" loading="lazy">
-              <span class="item-name" style="color:${qColor(item.quality)}">${esc(item.name)}</span>
-            </a>
-            <span class="needed-meta">${esc(slots.join(', '))}${neededAllLoadouts ? ` — ${esc(loadouts.join(', '))}` : ''}</span>
-          </div>
-          ${item.note ? `<div class="item-source note-static">🗒 ${esc(item.note)}</div>` : ''}
-        </div>`).join('')}
-    </article>`).join('');
+  // The planner needs the source index; load it lazily on first open.
+  if (!sourcesReady() && !sourcesFailed) {
+    loadSources().then(() => renderAll(), () => { sourcesFailed = true; renderAll(); });
+    return `
+      <section class="needed">
+        <div class="needed-head"><h3>${entries.length} item${entries.length === 1 ? '' : 's'} still needed — ${esc(ph.name)}</h3>${scopeToggle}</div>
+        <p class="hint">Loading planner data…</p>
+      </section>`;
+  }
+
+  let groupHtml;
+  if (sourcesFailed) {
+    // Fallback: flat grouping by the stored source line.
+    const flat = new Map();
+    for (const e of entries) {
+      const key = e.item.source || 'Unknown source';
+      if (!flat.has(key)) flat.set(key, []);
+      flat.get(key).push(e);
+    }
+    groupHtml = [...flat.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([source, list]) => `
+      <article class="needed-group">
+        <h4 class="needed-source">${esc(source)} <span class="hint">(${list.length})</span></h4>
+        ${list.map((e) => neededItemRowHtml(e)).join('')}
+      </article>`).join('');
+  } else {
+    groupHtml = plannerGroups(entries).map((g) => `
+      <article class="needed-group">
+        <h4 class="needed-source">${esc(g.title)}
+          <span class="upgrade-chip">${g.itemIds.size} upgrade${g.itemIds.size === 1 ? '' : 's'}</span>
+        </h4>
+        ${[...g.subs.entries()]
+          .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
+          .map(([sub, rows]) => `
+          <div class="planner-sub">
+            <h5>${esc(sub)}</h5>
+            ${rows.map(({ entry, chance, more }) => {
+              const bits = [];
+              if (chance != null) bits.push(`${chance}%`);
+              if (more) bits.push(`+${more} more`);
+              return neededItemRowHtml(entry, bits.join(' · '));
+            }).join('')}
+          </div>`).join('')}
+      </article>`).join('');
+  }
 
   return `
     <section class="needed">

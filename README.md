@@ -21,9 +21,11 @@ notes stay in sync across every loadout and phase that shares the item.
   (the top one is marked **BIS**; reorder with ▲/▼).
 - **Synced obtained status & notes** — shared across loadouts and phases by design;
   a ⇄ badge shows where else an item appears.
-- **"Still needed" view** — every unobtained item for the selected phase (current
-  loadout or all loadouts), grouped by drop source, tickable right from the list —
-  ideal for planning what to run tonight.
+- **Planner view** — every unobtained item for the selected phase (current
+  loadout or all loadouts), grouped by dungeon/raid/zone with the boss and drop
+  chance nested inside, plus Quests / Crafted / Vendors sections — one glance
+  answers "which instance gives me the most upgrades tonight?". Items are
+  tickable right from the list.
 - **Auto source info** — the drop/vendor/quest source is parsed from Wowhead's
   tooltip data and shown under each item, and drives the grouping above.
 - **Enchants per slot** — an optional enchant line on every slot, per loadout
@@ -72,8 +74,9 @@ ES modules load.)
 | `js/share.js` | Share-link encoding/decoding (deflate + base64url in the URL hash) |
 | `js/app.js` | Rendering (slots / needed / overview views) and event handling |
 | `data/items.json` | Slim item index (id, name, quality, slot, source) the search runs on |
-| `scripts/build_itemdb.py` | Regenerates `data/items.json` from the community database |
-| `.github/workflows/itemdb.yml` | Weekly refresh of `data/items.json` (also runnable manually) |
+| `data/sources.json` | Planner index: where each equippable item comes from (boss, zone, chance) |
+| `scripts/build_itemdb.py` | Regenerates the `data/` indexes from the community database |
+| `.github/workflows/itemdb.yml` | Weekly refresh of the `data/` indexes (also runnable manually) |
 
 Item search data comes from [wow-forever-kb](https://github.com/gBlaku/wow-forever-kb),
 a community database generated daily from the game client's own data tables.
