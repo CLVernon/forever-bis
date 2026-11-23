@@ -27,9 +27,29 @@ async function fetchJson(url) {
 }
 
 /**
- * Fetch item details (name, quality, icon) from Wowhead's tooltip endpoint —
- * the same endpoint the official widget uses, served with CORS headers.
- * Throws on failure.
+ * Pull "where does this come from" lines out of Wowhead's tooltip HTML —
+ * e.g. "Drop: Golemagg the Incinerator", "Sold by: …", "Quest: …".
+ * Returns '' when the tooltip has no source info (that is still a valid
+ * parse result, distinct from null = never parsed).
+ */
+function extractSource(tooltipHtml) {
+  if (typeof tooltipHtml !== 'string') return '';
+  const text = tooltipHtml
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(div|tr|td|th|table|p|li|span)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ');
+  const lines = text.split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const pat = /^(Drop(?:ped by)?|Sold by|Vendor|Quest|Created by|Crafted by|Contained in|Pick ?Pocket(?:ed from)?|Fish(?:ing|ed)|Gathered|Mined|Reward from|Source|Zone)\s*:\s*\S/i;
+  const hits = lines.filter((l) => pat.test(l));
+  return hits.slice(0, 2).join(' · ').slice(0, 160);
+}
+
+/**
+ * Fetch item details (name, quality, icon, source) from Wowhead's tooltip
+ * endpoint — the same endpoint the official widget uses, served with CORS
+ * headers. Throws on failure.
  */
 export async function fetchItem(id) {
   const data = await fetchJson(
@@ -44,7 +64,12 @@ export async function fetchItem(id) {
     }
   }
   if (!name) throw new Error('No item data');
-  return { id: String(id), name, quality, icon: data.icon || null, fetched: true };
+  return {
+    id: String(id), name, quality,
+    icon: data.icon || null,
+    source: extractSource(data.tooltip),
+    fetched: true,
+  };
 }
 
 /**

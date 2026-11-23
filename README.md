@@ -19,10 +19,27 @@ notes stay in sync across every loadout and phase that shares the item.
   (the top one is marked **BIS**; reorder with ▲/▼).
 - **Synced obtained status & notes** — shared across loadouts and phases by design;
   a ⇄ badge shows where else an item appears.
+- **"Still needed" view** — every unobtained item for the selected phase (current
+  loadout or all loadouts), grouped by drop source, tickable right from the list —
+  ideal for planning what to run tonight.
+- **Auto source info** — the drop/vendor/quest source is parsed from Wowhead's
+  tooltip data and shown under each item, and drives the grouping above.
+- **Enchants per slot** — an optional enchant line on every slot, per loadout
+  and phase.
+- **Copy forward & duplicate** — merge one phase's goals into another (current
+  loadout or the whole character) and duplicate loadouts, so Tier 2 starts from
+  Tier 1 instead of a blank page.
+- **Share links** — ⋯ → *Share character link* packs the character into a
+  compressed URL. Recipients get a read-only view (no server involved) and can
+  save a copy into their own tracker.
+- **All-characters overview** — progress per character per phase at a glance.
+- **Hide obtained & undo** — declutter finished slots, and undo any delete or
+  removal from a toast instead of relying on confirm dialogs.
 - **Wowhead integration** — add items by name search, item ID, or a pasted Wowhead
-  link. Name, quality color, and icon are fetched from Wowhead's Forever tooltip
-  API, and hovering an item shows the full Wowhead tooltip. If a lookup fails
-  (offline, blocked), the item is still added and can be refreshed later with ↻.
+  link. Name, quality color, icon, and source are fetched from Wowhead's Forever
+  tooltip API, and hovering an item shows the full Wowhead tooltip. If a lookup
+  fails (offline, blocked), the item is still added and can be refreshed later
+  with ↻.
 - **Local & private** — everything is stored in your browser's `localStorage`.
   Use **⋯ → Export backup** for a JSON backup, and **Import backup** to restore it
   (e.g. on another device).
@@ -48,8 +65,9 @@ ES modules load.)
 | --- | --- |
 | `index.html` | App shell and dialogs |
 | `js/store.js` | Data model (phases → loadouts → slots), localStorage persistence, game constants |
-| `js/wowhead.js` | Wowhead URLs, tooltip-API fetch, name search, input parsing |
-| `js/app.js` | Rendering and event handling |
+| `js/wowhead.js` | Wowhead URLs, tooltip-API fetch, source parsing, name search, input parsing |
+| `js/share.js` | Share-link encoding/decoding (deflate + base64url in the URL hash) |
+| `js/app.js` | Rendering (slots / needed / overview views) and event handling |
 | `css/style.css` | Theme and layout |
 
 Item data and tooltips are provided by [Wowhead](https://www.wowhead.com/forever).

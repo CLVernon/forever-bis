@@ -1,16 +1,21 @@
 import {
   SLOTS, CLASSES, QUALITY_COLORS,
-  state, save, replaceState,
+  state, save, load, replaceState, snapshot, uid,
+  setReadOnly, isReadOnly,
   makeCharacter, makeLoadout,
   activeCharacter, activeLoadout, activePhase,
-  setActiveLoadout, setActivePhase, slotsOf,
-  addPhase, renamePhase, deletePhase,
+  setActiveLoadout, setActivePhase, slotsOf, enchantsOf,
+  addPhase, renamePhase, deletePhase, copyPhaseGoals,
+  duplicateLoadout, setEnchant,
   addItemToSlot, removeItemFromSlot, moveItemInSlot, placesUsingItem,
+  neededItems, phaseProgress,
 } from './store.js';
 
 import {
   itemUrl, searchUrl, iconUrl, fetchItem, searchItems, parseItemInput,
 } from './wowhead.js';
+
+import { encodeShare, decodeShare } from './share.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const app = $('#app');
@@ -25,8 +30,11 @@ function qColor(quality) {
   return QUALITY_COLORS[quality] ?? '#d8d4cb';
 }
 
-// Set of item rows whose note editor is open (survives re-render).
+// UI-only state (survives re-render, not reloads).
 const openNotes = new Set();
+const openEnchants = new Set();
+let view = 'slots'; // slots | needed | overview
+let neededAllLoadouts = true;
 
 // ---- Rendering ----------------------------------------------------------
 
@@ -37,20 +45,35 @@ function renderAll() {
 }
 
 function renderTopbar() {
+  const ro = isReadOnly();
   const sel = $('#charSelect');
   sel.innerHTML = state.characters.map((c) =>
     `<option value="${c.id}" ${c.id === state.activeCharacterId ? 'selected' : ''}>${esc(c.name)}</option>`
   ).join('');
   const hasChar = state.characters.length > 0;
-  sel.hidden = !hasChar;
+  sel.hidden = !hasChar || ro;
+  $('#newCharBtn').hidden = ro;
+  $('#menuBtn').hidden = ro;
   $('[data-menu="edit-char"]').disabled = !hasChar;
   $('[data-menu="delete-char"]').disabled = !hasChar;
+  $('[data-menu="share"]').disabled = !hasChar;
 }
 
 function renderMain() {
+  const ro = isReadOnly();
   const ch = activeCharacter();
+
+  const banner = ro ? `
+    <div class="share-banner">
+      <span>👁 Viewing a shared character — read-only.</span>
+      <span class="share-banner-actions">
+        <button class="btn" data-action="save-shared-copy">Save a copy to my tracker</button>
+        <button class="btn btn-ghost" data-action="exit-share">Open my own tracker</button>
+      </span>
+    </div>` : '';
+
   if (!ch) {
-    app.innerHTML = `
+    app.innerHTML = banner + `
       <section class="welcome">
         <h2>Track your Best-in-Slot goals</h2>
         <p>Create a character, set up loadouts (specs) and phases (e.g. Pre Raid,
@@ -59,6 +82,11 @@ function renderMain() {
            all loadouts and phases.</p>
         <button class="btn btn-primary btn-lg" data-action="new-char">Create your first character</button>
       </section>`;
+    return;
+  }
+
+  if (view === 'overview') {
+    app.innerHTML = banner + viewSwitchHtml() + overviewHtml();
     return;
   }
 
@@ -82,20 +110,22 @@ function renderMain() {
       <section class="welcome">
         <p>No loadouts yet. A loadout is a goal set for one spec or purpose —
            e.g. <em>Enhancement</em>, <em>Elemental</em>, <em>Restoration</em>.</p>
-        <button class="btn btn-primary" data-action="new-loadout">Create a loadout</button>
+        ${ro ? '' : '<button class="btn btn-primary" data-action="new-loadout">Create a loadout</button>'}
       </section>`;
   } else if (!ph) {
     body = `
       <section class="welcome">
         <p>No phases yet. A phase is a stage of gearing — e.g. <em>Pre Raid</em>,
            <em>Tier 1</em>. Phases are shared by every loadout on every character.</p>
-        <button class="btn btn-primary" data-action="new-phase">Create a phase</button>
+        ${ro ? '' : '<button class="btn btn-primary" data-action="new-phase">Create a phase</button>'}
       </section>`;
+  } else if (view === 'needed') {
+    body = neededHtml(ch, lo, ph);
   } else {
     body = slotsHtml(ch, lo, ph);
   }
 
-  app.innerHTML = `
+  app.innerHTML = banner + `
     <section class="char-head">
       <div class="char-id">
         <h2 style="color:${cls.color}">${esc(ch.name)}</h2>
@@ -104,12 +134,15 @@ function renderMain() {
       ${lo && ph ? progressHtml(ch, lo, ph) : ''}
     </section>
 
+    ${viewSwitchHtml()}
+
     <nav class="tabs tabs-phases">
       <span class="tabs-label">Phase</span>
       ${phaseTabs}
-      <button class="tab tab-add" data-action="new-phase" title="Add a phase (added to all loadouts on all characters)">+ Phase</button>
-      ${ph ? `
+      ${ro ? '' : `<button class="tab tab-add" data-action="new-phase" title="Add a phase (added to all loadouts on all characters)">+ Phase</button>`}
+      ${ph && !ro ? `
         <span class="tab-tools">
+          <button class="icon-btn" data-action="copy-phase" title="Copy goals from another phase into ${esc(ph.name)}">⧉</button>
           <button class="icon-btn" data-action="rename-phase" title="Rename phase">✎</button>
           <button class="icon-btn danger" data-action="delete-phase" title="Delete phase">🗑</button>
         </span>` : ''}
@@ -118,9 +151,10 @@ function renderMain() {
     <nav class="tabs">
       <span class="tabs-label">Loadout</span>
       ${loadoutTabs}
-      <button class="tab tab-add" data-action="new-loadout" title="Add loadout">+ Loadout</button>
-      ${lo ? `
+      ${ro ? '' : `<button class="tab tab-add" data-action="new-loadout" title="Add loadout">+ Loadout</button>`}
+      ${lo && !ro ? `
         <span class="tab-tools">
+          <button class="icon-btn" data-action="duplicate-loadout" title="Duplicate loadout">⧉</button>
           <button class="icon-btn" data-action="rename-loadout" title="Rename loadout">✎</button>
           <button class="icon-btn danger" data-action="delete-loadout" title="Delete loadout">🗑</button>
         </span>` : ''}
@@ -128,6 +162,22 @@ function renderMain() {
 
     ${body}
   `;
+}
+
+function viewSwitchHtml() {
+  const btn = (id, label) =>
+    `<button class="view-btn ${view === id ? 'active' : ''}" data-action="set-view" data-id="${id}">${label}</button>`;
+  return `
+    <div class="view-switch">
+      ${btn('slots', 'Gear slots')}
+      ${btn('needed', 'Still needed')}
+      ${btn('overview', 'All characters')}
+      ${view === 'slots' ? `
+        <label class="hide-obtained" title="Hide obtained items in the slot lists">
+          <input type="checkbox" data-action="toggle-hide-obtained" ${state.hideObtained ? 'checked' : ''}>
+          Hide obtained
+        </label>` : ''}
+    </div>`;
 }
 
 function progressHtml(ch, lo, ph) {
@@ -149,33 +199,72 @@ function progressHtml(ch, lo, ph) {
     </div>`;
 }
 
+// ---- Gear slots view ------------------------------------------------------
+
 function slotsHtml(ch, lo, ph) {
+  const ro = isReadOnly();
   const slots = slotsOf(lo, ph);
+  const enchants = enchantsOf(lo, ph);
   const cards = SLOTS.map((s) => {
-    const items = slots[s.key].map((id, i) =>
-      itemRowHtml(ch, lo, ph, s.key, id, i, slots[s.key].length)).join('');
+    const all = slots[s.key];
+    const shown = state.hideObtained && !ro
+      ? all.filter((id) => !ch.items[id]?.obtained)
+      : all;
+    const items = shown.map((id) =>
+      itemRowHtml(ch, lo, ph, s.key, id, all.indexOf(id), all.length)).join('');
+    const hiddenCount = all.length - shown.length;
+    const empty = all.length === 0
+      ? '<p class="slot-empty">No goals yet</p>'
+      : (shown.length === 0 ? `<p class="slot-empty">All ${all.length} obtained ✓</p>` : '');
     return `
-      <article class="slot-card ${slots[s.key].some((id) => ch.items[id]?.obtained) ? 'slot-done' : ''}">
+      <article class="slot-card ${all.some((id) => ch.items[id]?.obtained) ? 'slot-done' : ''}">
         <header class="slot-head">
           <h3>${s.label}</h3>
-          <button class="icon-btn add" data-action="add-item" data-slot="${s.key}" title="Add goal item to ${s.label}">+</button>
+          ${ro ? '' : `<button class="icon-btn add" data-action="add-item" data-slot="${s.key}" title="Add goal item to ${s.label}">+</button>`}
         </header>
-        ${items || '<p class="slot-empty">No goals yet</p>'}
+        ${items}${empty}
+        ${hiddenCount > 0 && shown.length > 0 ? `<p class="slot-empty">+ ${hiddenCount} obtained hidden</p>` : ''}
+        ${enchantHtml(lo, ph, s.key, enchants[s.key])}
       </article>`;
   }).join('');
   return `<section class="slots">${cards}</section>`;
 }
 
+function enchantHtml(lo, ph, slotKey, text) {
+  const ro = isReadOnly();
+  const editing = openEnchants.has(`${lo.id}/${ph.id}/${slotKey}`);
+  if (editing && !ro) {
+    return `
+      <div class="enchant-line editing">
+        <span class="enchant-star">✦</span>
+        <input class="enchant-input" data-action="edit-enchant" data-slot="${slotKey}"
+          value="${esc(text ?? '')}" placeholder="Enchant — e.g. Crusader" maxlength="80">
+      </div>`;
+  }
+  if (text) {
+    return `
+      <div class="enchant-line">
+        <span class="enchant-star">✦</span>
+        <span class="enchant-text">${esc(text)}</span>
+        ${ro ? '' : `<button class="icon-btn" data-action="toggle-enchant" data-slot="${slotKey}" title="Edit enchant">✎</button>`}
+      </div>`;
+  }
+  return ro ? '' : `
+    <button class="enchant-add" data-action="toggle-enchant" data-slot="${slotKey}">+ enchant</button>`;
+}
+
 function itemRowHtml(ch, lo, ph, slotKey, itemId, index, count) {
+  const ro = isReadOnly();
   const item = ch.items[itemId] ?? { id: itemId, name: `Item ${itemId}`, quality: null, icon: null };
   const elsewhere = placesUsingItem(ch, itemId, lo.id, ph.id);
   const noteOpen = openNotes.has(`${lo.id}/${ph.id}/${slotKey}/${itemId}`);
   const key = `data-slot="${slotKey}" data-item="${itemId}"`;
+  const canRefresh = !ro && (!item.fetched || item.source == null);
   return `
   <div class="item-row ${item.obtained ? 'obtained' : ''}">
     <div class="item-main">
       <label class="obtain" title="${item.obtained ? 'Obtained — click to unmark' : 'Mark as obtained'}">
-        <input type="checkbox" data-action="toggle-obtained" ${key} ${item.obtained ? 'checked' : ''}>
+        <input type="checkbox" data-action="toggle-obtained" ${key} ${item.obtained ? 'checked' : ''} ${ro ? 'disabled' : ''}>
         <span class="obtain-box"></span>
       </label>
       <a class="item-link" href="${itemUrl(itemId)}" target="_blank" rel="noopener"
@@ -185,15 +274,18 @@ function itemRowHtml(ch, lo, ph, slotKey, itemId, index, count) {
       </a>
       ${index === 0 && count > 1 ? '<span class="bis-chip" title="Top priority for this slot">BIS</span>' : ''}
       ${elsewhere.length ? `<span class="sync-chip" title="Also in: ${esc(elsewhere.join(', '))} — obtained status and notes are shared">⇄ ${elsewhere.length}</span>` : ''}
+      ${ro ? '' : `
       <span class="item-tools">
-        ${!item.fetched ? `<button class="icon-btn" data-action="refresh-item" ${key} title="Retry fetching item details from Wowhead">↻</button>` : ''}
+        ${canRefresh ? `<button class="icon-btn" data-action="refresh-item" ${key} title="Fetch item details from Wowhead">↻</button>` : ''}
         <button class="icon-btn ${item.note ? 'has-note' : ''}" data-action="toggle-note" ${key} title="${item.note ? 'Edit note' : 'Add note'}">🗒</button>
         <button class="icon-btn" data-action="move-up" ${key} title="Move up" ${index === 0 ? 'disabled' : ''}>▲</button>
         <button class="icon-btn" data-action="move-down" ${key} title="Move down" ${index === count - 1 ? 'disabled' : ''}>▼</button>
         <button class="icon-btn danger" data-action="remove-item" ${key} title="Remove from this slot">✕</button>
-      </span>
+      </span>`}
     </div>
-    ${noteOpen ? `
+    ${item.source ? `<div class="item-source">${esc(item.source)}</div>` : ''}
+    ${ro && item.note ? `<div class="item-source note-static">🗒 ${esc(item.note)}</div>` : ''}
+    ${noteOpen && !ro ? `
       <div class="note-wrap">
         <textarea class="note" data-action="edit-note" ${key} rows="2"
           placeholder="How to obtain — boss, quest, cost, drop rate…">${esc(item.note)}</textarea>
@@ -202,9 +294,134 @@ function itemRowHtml(ch, lo, ph, slotKey, itemId, index, count) {
   </div>`;
 }
 
+// ---- Still-needed view ------------------------------------------------------
+
+function neededHtml(ch, lo, ph) {
+  const ro = isReadOnly();
+  const scopeLoadout = neededAllLoadouts ? null : lo.id;
+  const entries = neededItems(ch, ph, scopeLoadout);
+
+  // Group by source.
+  const groups = new Map();
+  for (const e of entries) {
+    const key = e.item.source || '❓ Unknown source';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(e);
+  }
+  const sorted = [...groups.entries()].sort((a, b) => {
+    const ua = a[0].startsWith('❓'), ub = b[0].startsWith('❓');
+    if (ua !== ub) return ua ? 1 : -1;
+    return a[0].localeCompare(b[0]);
+  });
+
+  const scopeToggle = `
+    <label class="hide-obtained">
+      <input type="checkbox" data-action="toggle-needed-scope" ${neededAllLoadouts ? 'checked' : ''}>
+      All loadouts (not just ${esc(lo.name)})
+    </label>`;
+
+  if (entries.length === 0) {
+    return `
+      <section class="needed">
+        <div class="needed-head"><h3>Nothing left to get in ${esc(ph.name)} 🎉</h3>${scopeToggle}</div>
+        <p class="hint">Every goal item ${neededAllLoadouts ? 'across all loadouts' : `in ${esc(lo.name)}`} is either obtained or no goals are set.</p>
+      </section>`;
+  }
+
+  const groupHtml = sorted.map(([source, list]) => `
+    <article class="needed-group">
+      <h4 class="needed-source">${esc(source)} <span class="hint">(${list.length})</span></h4>
+      ${list.map(({ item, slots, loadouts }) => `
+        <div class="item-row needed-row">
+          <div class="item-main">
+            <label class="obtain" title="Mark as obtained">
+              <input type="checkbox" data-action="toggle-obtained" data-item="${item.id}" ${ro ? 'disabled' : ''}>
+              <span class="obtain-box"></span>
+            </label>
+            <a class="item-link" href="${itemUrl(item.id)}" target="_blank" rel="noopener" data-wh-icon-size="medium">
+              <img class="item-icon" src="${iconUrl(item.icon)}" alt="" loading="lazy">
+              <span class="item-name" style="color:${qColor(item.quality)}">${esc(item.name)}</span>
+            </a>
+            <span class="needed-meta">${esc(slots.join(', '))}${neededAllLoadouts ? ` — ${esc(loadouts.join(', '))}` : ''}</span>
+          </div>
+          ${item.note ? `<div class="item-source note-static">🗒 ${esc(item.note)}</div>` : ''}
+        </div>`).join('')}
+    </article>`).join('');
+
+  return `
+    <section class="needed">
+      <div class="needed-head">
+        <h3>${entries.length} item${entries.length === 1 ? '' : 's'} still needed — ${esc(ph.name)}</h3>
+        ${scopeToggle}
+      </div>
+      ${groupHtml}
+    </section>`;
+}
+
+// ---- Overview view ----------------------------------------------------------
+
+function overviewHtml() {
+  if (state.characters.length === 0) {
+    return '<section class="welcome"><p>No characters yet.</p></section>';
+  }
+  const cards = state.characters.map((ch) => {
+    const cls = CLASSES[ch.cls];
+    const rows = state.phases.map((p) => {
+      const { got, total } = phaseProgress(ch, p);
+      const pct = total ? Math.round((got / total) * 100) : 0;
+      return `
+        <div class="ov-phase">
+          <span class="ov-phase-name">${esc(p.name)}</span>
+          <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+          <span class="ov-phase-nums">${got}/${total}</span>
+        </div>`;
+    }).join('');
+    return `
+      <article class="ov-card" data-action="open-char" data-id="${ch.id}" role="button" tabindex="0"
+        title="Open ${esc(ch.name)}">
+        <h3 style="color:${cls.color}">${esc(ch.name)}</h3>
+        <span class="char-sub">${esc([ch.race, cls.label !== 'Other' ? cls.label : ''].filter(Boolean).join(' '))}
+          · ${ch.loadouts.length} loadout${ch.loadouts.length === 1 ? '' : 's'}</span>
+        ${state.phases.length ? rows : '<p class="slot-empty">No phases yet</p>'}
+      </article>`;
+  }).join('');
+  return `<section class="overview">${cards}</section>`;
+}
+
 function refreshTooltips() {
-  // Ask the Wowhead widget (if it loaded) to scan new links.
   try { window.WH?.Tooltips?.refreshLinks?.(); } catch { /* widget optional */ }
+}
+
+// ---- Undo toast -----------------------------------------------------------
+
+let toastTimer = null;
+let toastUndoFn = null;
+
+function showToast(msg, undoFn) {
+  const toast = $('#toast');
+  $('#toastMsg').textContent = msg;
+  toastUndoFn = undoFn;
+  $('#toastUndo').hidden = !undoFn;
+  toast.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, 8000);
+}
+
+function hideToast() {
+  $('#toast').hidden = true;
+  toastUndoFn = null;
+  clearTimeout(toastTimer);
+}
+
+/** Run a mutation with a one-click undo. */
+function withUndo(label, fn) {
+  const snap = snapshot();
+  fn();
+  renderAll();
+  showToast(label, () => {
+    replaceState(snap);
+    renderAll();
+  });
 }
 
 // ---- Dialog helpers -----------------------------------------------------
@@ -212,6 +429,8 @@ function refreshTooltips() {
 const charDialog = $('#charDialog');
 const nameDialog = $('#nameDialog');
 const addItemDialog = $('#addItemDialog');
+const copyDialog = $('#copyDialog');
+const shareDialog = $('#shareDialog');
 let editingCharId = null;
 let nameMode = 'new-loadout'; // new-loadout | rename-loadout | new-phase | rename-phase
 let addItemSlot = null;
@@ -251,6 +470,35 @@ function openNameDialog(mode) {
   nameDialog.showModal();
 }
 
+function openCopyDialog() {
+  const ph = activePhase();
+  const others = state.phases.filter((p) => p.id !== ph.id);
+  if (!others.length) {
+    showToast('No other phase to copy from — create another phase first.', null);
+    return;
+  }
+  $('#copyTargetName').textContent = ph.name;
+  $('#copyForm').fromPhase.innerHTML = others.map((p) =>
+    `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  copyDialog.showModal();
+}
+
+async function openShareDialog() {
+  const ch = activeCharacter();
+  if (!ch) return;
+  $('#shareCharName').textContent = ch.name;
+  $('#shareUrl').value = 'Generating…';
+  shareDialog.showModal();
+  try {
+    const payload = await encodeShare({ v: 2, phases: state.phases, character: ch });
+    const base = location.href.split('#')[0];
+    $('#shareUrl').value = `${base}#share=${payload}`;
+  } catch (e) {
+    console.error(e);
+    $('#shareUrl').value = 'Sorry — could not generate the link in this browser.';
+  }
+}
+
 function openAddItemDialog(slotKey) {
   addItemSlot = slotKey;
   $('#addItemSlotName').textContent = SLOTS.find((s) => s.key === slotKey)?.label ?? slotKey;
@@ -282,7 +530,7 @@ async function addItemById(id, fallbackName) {
   try {
     item = await fetchItem(id);
   } catch {
-    item = { id: String(id), name: fallbackName || `Item ${id}`, quality: null, icon: null, fetched: false };
+    item = { id: String(id), name: fallbackName || `Item ${id}`, quality: null, icon: null, source: null, fetched: false };
     setAddStatus('Could not fetch details (offline or blocked) — added with the info available. Use ↻ on the item to retry.', 'warn');
   }
   if (slotsOf(lo, ph)[addItemSlot].includes(String(id))) {
@@ -299,7 +547,6 @@ async function runAddItemSearch(raw) {
   if (!parsed) return;
   if (parsed.id) { await addItemById(parsed.id, parsed.name); return; }
 
-  // Name search
   $('#addItemWowheadLink').href = searchUrl(parsed.query);
   setAddStatus('Searching Wowhead…');
   try {
@@ -321,6 +568,49 @@ async function runAddItemSearch(raw) {
       'Open the Wowhead link below, find your item, and paste its link or ID here.', 'warn');
     $('#addItemResults').innerHTML = '';
   }
+}
+
+// ---- Share mode -----------------------------------------------------------
+
+let sharedPayload = null; // decoded {v, phases, character} while viewing a share
+
+function saveSharedCopy() {
+  if (!sharedPayload) return;
+  const local = load(); // the visitor's own data, untouched while read-only
+  const phaseMap = {};
+  for (const p of sharedPayload.phases ?? []) {
+    const existing = local.phases.find((lp) => lp.name.toLowerCase() === p.name.toLowerCase());
+    if (existing) {
+      phaseMap[p.id] = existing.id;
+    } else {
+      const np = { id: uid(), name: p.name };
+      local.phases.push(np);
+      phaseMap[p.id] = np.id;
+    }
+  }
+  const ch = structuredClone(sharedPayload.character);
+  ch.id = uid();
+  if (local.characters.some((c) => c.name === ch.name)) ch.name += ' (shared)';
+  for (const lo of ch.loadouts ?? []) {
+    lo.id = uid();
+    lo.phases = Object.fromEntries(Object.entries(lo.phases ?? {})
+      .map(([pid, slots]) => [phaseMap[pid] ?? pid, slots]));
+    lo.enchants = Object.fromEntries(Object.entries(lo.enchants ?? {})
+      .map(([pid, m]) => [phaseMap[pid] ?? pid, m]));
+  }
+  local.characters.push(ch);
+  local.activeCharacterId = ch.id;
+  setReadOnly(false);
+  sharedPayload = null;
+  history.replaceState(null, '', location.pathname + location.search);
+  replaceState(local); // normalize backfills new phases onto existing loadouts
+  renderAll();
+  showToast(`Saved ${ch.name} to your tracker.`, null);
+}
+
+function exitShare() {
+  history.replaceState(null, '', location.pathname + location.search);
+  location.reload();
 }
 
 // ---- Export / import ----------------------------------------------------
@@ -352,8 +642,7 @@ function importBackup(file) {
 // ---- Events -------------------------------------------------------------
 
 document.addEventListener('click', (e) => {
-  const menuWrap = e.target.closest('.menu-wrap');
-  if (!menuWrap) $('#menu').hidden = true;
+  if (!e.target.closest('.menu-wrap')) $('#menu').hidden = true;
 });
 
 $('#menuBtn').addEventListener('click', () => {
@@ -369,14 +658,16 @@ $('#menu').addEventListener('click', (e) => {
   switch (btn.dataset.menu) {
     case 'edit-char': if (ch) openCharDialog(ch); break;
     case 'delete-char':
-      if (ch && confirm(`Delete ${ch.name} and all their loadouts? This cannot be undone.`)) {
-        state.characters = state.characters.filter((c) => c.id !== ch.id);
-        delete state.activeLoadoutByChar[ch.id];
-        state.activeCharacterId = state.characters[0]?.id ?? null;
-        save();
-        renderAll();
+      if (ch && confirm(`Delete ${ch.name} and all their loadouts?`)) {
+        withUndo(`Deleted ${ch.name}.`, () => {
+          state.characters = state.characters.filter((c) => c.id !== ch.id);
+          delete state.activeLoadoutByChar[ch.id];
+          state.activeCharacterId = state.characters[0]?.id ?? null;
+          save();
+        });
       }
       break;
+    case 'share': openShareDialog(); break;
     case 'export': exportBackup(); break;
     case 'import': $('#importFile').click(); break;
   }
@@ -395,6 +686,24 @@ $('#charSelect').addEventListener('change', (e) => {
 });
 
 $('#newCharBtn').addEventListener('click', () => openCharDialog());
+
+$('#toastUndo').addEventListener('click', () => {
+  toastUndoFn?.();
+  hideToast();
+});
+$('#toastClose').addEventListener('click', hideToast);
+
+$('#copyShareUrl').addEventListener('click', async () => {
+  const input = $('#shareUrl');
+  input.select();
+  try {
+    await navigator.clipboard.writeText(input.value);
+    $('#copyShareUrl').textContent = 'Copied ✓';
+    setTimeout(() => { $('#copyShareUrl').textContent = 'Copy link'; }, 1500);
+  } catch {
+    document.execCommand('copy'); // fallback; text is already selected
+  }
+});
 
 // Dialog: character save
 $('#charForm').addEventListener('submit', () => {
@@ -446,6 +755,19 @@ $('#nameForm').addEventListener('submit', () => {
   renderAll();
 });
 
+// Dialog: copy goals between phases
+$('#copyForm').addEventListener('submit', () => {
+  const f = $('#copyForm');
+  const ch = activeCharacter();
+  const toPhase = activePhase();
+  const fromPhase = state.phases.find((p) => p.id === f.fromPhase.value);
+  if (!ch || !toPhase || !fromPhase) return;
+  const scopeLoadout = f.scope.value === 'loadout' ? activeLoadout(ch)?.id : null;
+  withUndo(`Copied goals from ${fromPhase.name} into ${toPhase.name}.`, () => {
+    copyPhaseGoals(ch, fromPhase, toPhase, scopeLoadout);
+  });
+});
+
 // Dialog: add item (submit = search/add; don't close)
 $('#addItemForm').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -458,7 +780,7 @@ $('#addItemResults').addEventListener('click', (e) => {
 });
 
 // Close buttons for all dialogs
-for (const dlg of [charDialog, nameDialog, addItemDialog]) {
+for (const dlg of [charDialog, nameDialog, addItemDialog, copyDialog, shareDialog]) {
   dlg.addEventListener('click', (e) => {
     if (e.target.matches('[data-close]')) dlg.close();
   });
@@ -468,10 +790,16 @@ for (const dlg of [charDialog, nameDialog, addItemDialog]) {
 app.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-action]');
   if (!btn || btn.matches('input,textarea')) return;
+  const ro = isReadOnly();
   const ch = activeCharacter();
   const lo = activeLoadout(ch);
   const ph = activePhase();
   const { action, slot, item: itemId, id } = btn.dataset;
+
+  // Navigation actions are always allowed; everything else is blocked read-only.
+  const navActions = new Set(['pick-loadout', 'pick-phase', 'set-view', 'open-char',
+    'save-shared-copy', 'exit-share']);
+  if (ro && !navActions.has(action)) return;
 
   switch (action) {
     case 'new-char': openCharDialog(); break;
@@ -479,30 +807,60 @@ app.addEventListener('click', (e) => {
     case 'rename-loadout': openNameDialog('rename-loadout'); break;
     case 'new-phase': openNameDialog('new-phase'); break;
     case 'rename-phase': openNameDialog('rename-phase'); break;
-    case 'delete-loadout':
-      if (lo && confirm(`Delete loadout “${lo.name}”? Item notes and obtained status are kept.`)) {
-        ch.loadouts = ch.loadouts.filter((l) => l.id !== lo.id);
-        setActiveLoadout(ch, ch.loadouts[0]?.id ?? null);
-        save();
+    case 'copy-phase': openCopyDialog(); break;
+    case 'duplicate-loadout':
+      if (lo) {
+        const copy = duplicateLoadout(ch, lo);
+        setActiveLoadout(ch, copy.id);
         renderAll();
       }
       break;
+    case 'delete-loadout':
+      if (lo) {
+        withUndo(`Deleted loadout “${lo.name}”.`, () => {
+          ch.loadouts = ch.loadouts.filter((l) => l.id !== lo.id);
+          setActiveLoadout(ch, ch.loadouts[0]?.id ?? null);
+          save();
+        });
+      }
+      break;
     case 'delete-phase':
-      if (ph && confirm(`Delete phase “${ph.name}” from ALL loadouts on ALL characters? Item notes and obtained status are kept.`)) {
-        deletePhase(ph);
-        renderAll();
+      if (ph && confirm(`Delete phase “${ph.name}” from ALL loadouts on ALL characters?`)) {
+        withUndo(`Deleted phase “${ph.name}”.`, () => deletePhase(ph));
       }
       break;
     case 'pick-loadout': setActiveLoadout(ch, id); renderAll(); break;
     case 'pick-phase': setActivePhase(id); renderAll(); break;
+    case 'set-view': view = id; renderAll(); break;
+    case 'open-char':
+      state.activeCharacterId = id;
+      save();
+      view = 'slots';
+      renderAll();
+      break;
+    case 'save-shared-copy': saveSharedCopy(); break;
+    case 'exit-share': exitShare(); break;
     case 'add-item': openAddItemDialog(slot); break;
-    case 'remove-item': removeItemFromSlot(ch, lo, ph, slot, itemId); renderAll(); break;
+    case 'remove-item': {
+      const name = ch.items[itemId]?.name ?? 'item';
+      withUndo(`Removed ${name}.`, () => removeItemFromSlot(ch, lo, ph, slot, itemId));
+      break;
+    }
     case 'move-up': moveItemInSlot(lo, ph, slot, itemId, -1); renderAll(); break;
     case 'move-down': moveItemInSlot(lo, ph, slot, itemId, +1); renderAll(); break;
     case 'toggle-note': {
       const key = `${lo.id}/${ph.id}/${slot}/${itemId}`;
       openNotes.has(key) ? openNotes.delete(key) : openNotes.add(key);
       renderAll();
+      break;
+    }
+    case 'toggle-enchant': {
+      const key = `${lo.id}/${ph.id}/${slot}`;
+      openEnchants.has(key) ? openEnchants.delete(key) : openEnchants.add(key);
+      renderAll();
+      if (openEnchants.has(key)) {
+        $(`.enchant-input[data-slot="${slot}"]`)?.focus();
+      }
       break;
     }
     case 'refresh-item':
@@ -520,29 +878,87 @@ app.addEventListener('click', (e) => {
 
 app.addEventListener('change', (e) => {
   const el = e.target;
-  if (el.dataset.action === 'toggle-obtained') {
-    const ch = activeCharacter();
-    const item = ch?.items[el.dataset.item];
-    if (item) {
-      item.obtained = el.checked;
+  if (isReadOnly()) return;
+  const ch = activeCharacter();
+  switch (el.dataset.action) {
+    case 'toggle-obtained': {
+      const item = ch?.items[el.dataset.item];
+      if (item) {
+        item.obtained = el.checked;
+        save();
+        renderAll();
+      }
+      break;
+    }
+    case 'toggle-hide-obtained':
+      state.hideObtained = el.checked;
       save();
       renderAll();
+      break;
+    case 'toggle-needed-scope':
+      neededAllLoadouts = el.checked;
+      renderAll();
+      break;
+    case 'edit-enchant': {
+      // change fires on blur/Enter: close the editor.
+      const lo = activeLoadout(ch);
+      const ph = activePhase();
+      openEnchants.delete(`${lo.id}/${ph.id}/${el.dataset.slot}`);
+      renderAll();
+      break;
     }
   }
 });
 
 app.addEventListener('input', (e) => {
   const el = e.target;
+  if (isReadOnly()) return;
+  const ch = activeCharacter();
   if (el.dataset.action === 'edit-note') {
-    const ch = activeCharacter();
     const item = ch?.items[el.dataset.item];
     if (item) {
       item.note = el.value;
       save(); // cheap; no re-render while typing
     }
+  } else if (el.dataset.action === 'edit-enchant') {
+    const lo = activeLoadout(ch);
+    const ph = activePhase();
+    if (lo && ph) setEnchant(lo, ph, el.dataset.slot, el.value);
+  }
+});
+
+// Close the enchant editor on Enter.
+app.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.dataset?.action === 'edit-enchant') {
+    e.preventDefault();
+    e.target.blur(); // triggers the change handler above
   }
 });
 
 // ---- Boot ---------------------------------------------------------------
 
-renderAll();
+async function boot() {
+  const m = location.hash.match(/^#share=(.+)$/);
+  if (m) {
+    try {
+      const data = await decodeShare(m[1]);
+      if (!data || !data.character) throw new Error('bad payload');
+      sharedPayload = data;
+      setReadOnly(true);
+      replaceState({
+        schema: 2,
+        phases: data.phases ?? [],
+        characters: [data.character],
+        activeCharacterId: data.character.id,
+        activeLoadoutByChar: {},
+      });
+    } catch (e) {
+      console.error('Could not open shared link', e);
+      alert('Sorry — that shared link could not be opened.');
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+  }
+  renderAll();
+}
+
+boot();

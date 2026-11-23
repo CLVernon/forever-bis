@@ -373,6 +373,194 @@ select:focus, input:focus, textarea:focus {
 }
 .note-wrap .hint { display: block; margin-top: 2px; }
 
+/* ---- View switcher ---- */
+
+.view-switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.view-btn {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.view-btn:first-child { border-radius: 8px 0 0 8px; }
+.view-btn:nth-child(3) { border-radius: 0 8px 8px 0; }
+.view-btn + .view-btn { margin-left: -7px; }
+.view-btn:hover { color: var(--text); }
+.view-btn.active {
+  background: var(--bg-card);
+  color: var(--gold-bright);
+  border-color: var(--gold);
+  position: relative;
+  z-index: 1;
+}
+
+.hide-obtained {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.hide-obtained input { accent-color: var(--gold); }
+
+/* ---- Item source line ---- */
+
+.item-source {
+  margin: 2px 0 2px 54px;
+  font-size: 12px;
+  color: #8d8368;
+}
+.item-source.note-static { color: #a89e8a; white-space: pre-wrap; }
+
+/* ---- Enchants ---- */
+
+.enchant-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed #2d2618;
+  font-size: 13px;
+}
+.enchant-star { color: var(--gold); }
+.enchant-text { color: #cfe8c0; }
+.enchant-input {
+  flex: 1;
+  font-size: 13px;
+  padding: 4px 8px;
+}
+.enchant-add {
+  display: block;
+  margin-top: 6px;
+  background: none;
+  border: 0;
+  color: #6b6250;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.enchant-add:hover { color: var(--gold); }
+
+/* ---- Still-needed view ---- */
+
+.needed { max-width: 760px; }
+.needed-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.needed-head h3 { margin: 0; color: var(--gold-bright); font-size: 16px; }
+.needed-head .hide-obtained { margin-left: 0; }
+
+.needed-group {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.needed-source {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--gold);
+  font-weight: 600;
+}
+.needed-row { border-top: 1px solid #2d2618; }
+.needed-row:first-of-type { border-top: 0; }
+.needed-meta {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: right;
+  flex: none;
+  max-width: 45%;
+}
+
+/* ---- Overview ---- */
+
+.overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+.ov-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: border-color .15s;
+}
+.ov-card:hover, .ov-card:focus-visible { border-color: var(--gold); }
+.ov-card h3 { margin: 0 0 2px; font-size: 18px; }
+.ov-phase {
+  display: grid;
+  grid-template-columns: 90px 1fr 48px;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ov-phase-name {
+  font-size: 12px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-phase-nums { font-size: 12px; color: var(--gold-bright); text-align: right; }
+
+/* ---- Share banner & toast ---- */
+
+.share-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: #2a2310;
+  border: 1px solid var(--gold);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  color: var(--gold-bright);
+}
+.share-banner-actions { display: flex; gap: 8px; }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--gold);
+  border-radius: 10px;
+  padding: 10px 14px;
+  box-shadow: 0 10px 40px rgba(0,0,0,.7);
+  z-index: 50;
+  max-width: min(520px, 92vw);
+}
+.toast[hidden] { display: none; }
+
 /* ---- Dialogs ---- */
 
 dialog {

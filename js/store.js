@@ -20,6 +20,8 @@ export const SLOTS = [
   { key: 'ranged',   label: 'Ranged / Relic' },
 ];
 
+export const SLOT_LABELS = Object.fromEntries(SLOTS.map((s) => [s.key, s.label]));
+
 export const CLASSES = {
   druid:   { label: 'Druid',   color: '#ff7c0a' },
   hunter:  { label: 'Hunter',  color: '#aad372' },
@@ -50,14 +52,25 @@ export const QUALITY_COLORS = {
 //   phases: [{ id, name }]            -- GLOBAL: shared by all characters
 //   characters: [{
 //     id, name, race, cls,
-//     items: { itemId: { id, name, icon, quality, fetched, obtained, note } },
-//     loadouts: [{ id, name, phases: { phaseId: { slotKey: [itemId] } } }],
+//     items: { itemId: { id, name, icon, quality, source, fetched, obtained, note } },
+//     loadouts: [{
+//       id, name,
+//       phases:   { phaseId: { slotKey: [itemId] } },
+//       enchants: { phaseId: { slotKey: 'enchant text' } },
+//     }],
 //   }]
 //
 // Items are stored once per character, so `obtained` and `note` stay in
 // sync across every loadout and phase that references the item.
+// Enchants are deliberately NOT shared: they belong to a loadout+phase+slot.
 
 const KEY = 'forever-bis/v1';
+
+// Read-only mode (viewing a shared link): all persistence is disabled so the
+// visitor's own data is never overwritten.
+let readOnly = false;
+export function setReadOnly(v) { readOnly = v; }
+export function isReadOnly() { return readOnly; }
 
 export function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -70,8 +83,11 @@ function emptySlots() {
 }
 
 export function makeLoadout(name) {
-  const lo = { id: uid(), name, phases: {} };
-  for (const p of state.phases) lo.phases[p.id] = emptySlots();
+  const lo = { id: uid(), name, phases: {}, enchants: {} };
+  for (const p of state.phases) {
+    lo.phases[p.id] = emptySlots();
+    lo.enchants[p.id] = {};
+  }
   return lo;
 }
 
@@ -87,6 +103,7 @@ function defaultState() {
     characters: [],
     activeCharacterId: null,
     activeLoadoutByChar: {}, // charId -> loadoutId
+    hideObtained: false,
   };
 }
 
@@ -96,6 +113,7 @@ function normalize(s) {
     ? s.phases.filter((p) => p && p.id && p.name).map((p) => ({ id: String(p.id), name: String(p.name) }))
     : [];
   s.activeLoadoutByChar = s.activeLoadoutByChar || {};
+  s.hideObtained = Boolean(s.hideObtained);
 
   // Migrate schema 1 (loadout.slots, per-character game versions) -> schema 2.
   const needsPhase = s.characters.some((c) =>
@@ -107,15 +125,22 @@ function normalize(s) {
   for (const ch of s.characters) {
     ch.items = ch.items && typeof ch.items === 'object' ? ch.items : {};
     delete ch.version;
+    for (const it of Object.values(ch.items)) {
+      if (typeof it.source !== 'string') it.source = null; // null = never parsed
+      it.note = typeof it.note === 'string' ? it.note : '';
+      it.obtained = Boolean(it.obtained);
+    }
     if (!CLASSES[ch.cls]) ch.cls = 'other';
     ch.loadouts = Array.isArray(ch.loadouts) ? ch.loadouts : [];
     for (const lo of ch.loadouts) {
       lo.phases = lo.phases && typeof lo.phases === 'object' ? lo.phases : {};
+      lo.enchants = lo.enchants && typeof lo.enchants === 'object' ? lo.enchants : {};
       if (lo.slots) { // schema 1: move the single slot set into the first phase
         if (s.phases[0]) lo.phases[s.phases[0].id] = lo.slots;
         delete lo.slots;
       }
-      const clean = {};
+      const cleanSlots = {};
+      const cleanEnchants = {};
       for (const p of s.phases) {
         const src = lo.phases[p.id];
         const slots = emptySlots();
@@ -125,9 +150,18 @@ function normalize(s) {
             .filter((id) => typeof id === 'string' || typeof id === 'number')
             .map(String);
         }
-        clean[p.id] = slots;
+        cleanSlots[p.id] = slots;
+        const esrc = lo.enchants[p.id];
+        const m = {};
+        if (esrc && typeof esrc === 'object') {
+          for (const sl of SLOTS) {
+            if (typeof esrc[sl.key] === 'string' && esrc[sl.key].trim()) m[sl.key] = esrc[sl.key];
+          }
+        }
+        cleanEnchants[p.id] = m;
       }
-      lo.phases = clean;
+      lo.phases = cleanSlots;
+      lo.enchants = cleanEnchants;
     }
   }
 
@@ -156,6 +190,7 @@ export const state = load();
 save();
 
 export function save() {
+  if (readOnly) return;
   try {
     localStorage.setItem(KEY, JSON.stringify(state));
   } catch (e) {
@@ -168,6 +203,11 @@ export function replaceState(next) {
   Object.keys(state).forEach((k) => delete state[k]);
   Object.assign(state, clean);
   save();
+}
+
+/** Deep snapshot of the current state, for undo. */
+export function snapshot() {
+  return structuredClone(state);
 }
 
 // ---- Selectors ----------------------------------------------------------
@@ -201,13 +241,20 @@ export function slotsOf(loadout, phase) {
   return loadout.phases[phase.id] ?? (loadout.phases[phase.id] = emptySlots());
 }
 
+export function enchantsOf(loadout, phase) {
+  return loadout.enchants[phase.id] ?? (loadout.enchants[phase.id] = {});
+}
+
 // ---- Phase mutations (global: apply to all loadouts on all characters) ---
 
 export function addPhase(name) {
   const p = { id: uid(), name };
   state.phases.push(p);
   for (const ch of state.characters) {
-    for (const lo of ch.loadouts) lo.phases[p.id] = emptySlots();
+    for (const lo of ch.loadouts) {
+      lo.phases[p.id] = emptySlots();
+      lo.enchants[p.id] = {};
+    }
   }
   state.activePhaseId = p.id;
   save();
@@ -222,11 +269,56 @@ export function renamePhase(phase, name) {
 export function deletePhase(phase) {
   state.phases = state.phases.filter((p) => p.id !== phase.id);
   for (const ch of state.characters) {
-    for (const lo of ch.loadouts) delete lo.phases[phase.id];
+    for (const lo of ch.loadouts) {
+      delete lo.phases[phase.id];
+      delete lo.enchants[phase.id];
+    }
   }
   if (state.activePhaseId === phase.id) {
     state.activePhaseId = state.phases[0]?.id ?? null;
   }
+  save();
+}
+
+/**
+ * Merge goals (and enchants, where the target has none) from one phase into
+ * another. `loadoutId` limits the copy to one loadout of `ch`; null = all.
+ */
+export function copyPhaseGoals(ch, fromPhase, toPhase, loadoutId = null) {
+  for (const lo of ch.loadouts) {
+    if (loadoutId && lo.id !== loadoutId) continue;
+    const from = slotsOf(lo, fromPhase);
+    const to = slotsOf(lo, toPhase);
+    for (const s of SLOTS) {
+      for (const id of from[s.key]) {
+        if (!to[s.key].includes(id)) to[s.key].push(id);
+      }
+    }
+    const fromE = enchantsOf(lo, fromPhase);
+    const toE = enchantsOf(lo, toPhase);
+    for (const k of Object.keys(fromE)) {
+      if (!toE[k]) toE[k] = fromE[k];
+    }
+  }
+  save();
+}
+
+// ---- Loadout mutations ----------------------------------------------------
+
+export function duplicateLoadout(ch, lo) {
+  const copy = structuredClone(lo);
+  copy.id = uid();
+  copy.name = `${lo.name} (copy)`;
+  ch.loadouts.splice(ch.loadouts.indexOf(lo) + 1, 0, copy);
+  save();
+  return copy;
+}
+
+export function setEnchant(loadout, phase, slotKey, text) {
+  const m = enchantsOf(loadout, phase);
+  const t = text.trim();
+  if (t) m[slotKey] = t;
+  else delete m[slotKey];
   save();
 }
 
@@ -241,6 +333,7 @@ export function addItemToSlot(ch, loadout, phase, slotKey, item) {
     name: item.name ?? existing?.name ?? `Item ${id}`,
     icon: item.icon ?? existing?.icon ?? null,
     quality: item.quality ?? existing?.quality ?? null,
+    source: typeof item.source === 'string' ? item.source : (existing?.source ?? null),
     fetched: Boolean(item.fetched || existing?.fetched),
     obtained: existing?.obtained ?? false,
     note: existing?.note ?? '',
@@ -294,4 +387,49 @@ export function placesUsingItem(ch, itemId, exceptLoadoutId, exceptPhaseId) {
     }
   }
   return out;
+}
+
+// ---- Aggregations ----------------------------------------------------------
+
+/**
+ * Unobtained items of a character for a phase, across all loadouts (or one),
+ * annotated with the slots and loadouts that want them.
+ * Returns [{ item, slots: [label], loadouts: [name] }].
+ */
+export function neededItems(ch, phase, loadoutId = null) {
+  const map = new Map();
+  for (const lo of ch.loadouts) {
+    if (loadoutId && lo.id !== loadoutId) continue;
+    const slots = lo.phases[phase.id];
+    if (!slots) continue;
+    for (const s of SLOTS) {
+      for (const id of slots[s.key]) {
+        const item = ch.items[id];
+        if (!item || item.obtained) continue;
+        let entry = map.get(id);
+        if (!entry) {
+          entry = { item, slots: new Set(), loadouts: new Set() };
+          map.set(id, entry);
+        }
+        entry.slots.add(s.label);
+        entry.loadouts.add(lo.name);
+      }
+    }
+  }
+  return [...map.values()].map((e) => ({
+    item: e.item, slots: [...e.slots], loadouts: [...e.loadouts],
+  }));
+}
+
+/** Progress of a character for a phase across all loadouts: { got, total }. */
+export function phaseProgress(ch, phase) {
+  const ids = new Set();
+  for (const lo of ch.loadouts) {
+    const slots = lo.phases[phase.id];
+    if (!slots) continue;
+    for (const arr of Object.values(slots)) for (const id of arr) ids.add(id);
+  }
+  let got = 0;
+  for (const id of ids) if (ch.items[id]?.obtained) got++;
+  return { got, total: ids.size };
 }
