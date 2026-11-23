@@ -15,7 +15,7 @@ import {
   itemUrl, searchUrl, iconUrl, fetchItem, parseItemInput,
 } from './wowhead.js';
 
-import { loadItemDb, searchItemDb, itemDbGet, itemDbReady } from './itemdb.js';
+import { loadItemDb, searchItemDb, itemDbGet, itemDbReady, itemFitsSlot } from './itemdb.js';
 
 import { encodeShare, decodeShare } from './share.js';
 
@@ -503,7 +503,10 @@ async function openShareDialog() {
 
 function openAddItemDialog(slotKey) {
   addItemSlot = slotKey;
-  $('#addItemSlotName').textContent = SLOTS.find((s) => s.key === slotKey)?.label ?? slotKey;
+  const label = SLOTS.find((s) => s.key === slotKey)?.label ?? slotKey;
+  $('#addItemSlotName').textContent = label;
+  $('#addItemSlotName2').textContent = label;
+  $('#addItemAllSlots').checked = false;
   $('#addItemInput').value = '';
   $('#addItemResults').innerHTML = '';
   setAddStatus(null);
@@ -530,6 +533,10 @@ async function addItemById(id, fallback = {}) {
   setAddStatus('Fetching item details from Wowhead…');
   // The local database may know the item too (name, quality, source with drop chance).
   const kb = itemDbGet(id);
+  // Warn (but don't refuse) when the item doesn't fit the slot it's added to.
+  const slotLabel = SLOTS.find((s) => s.key === addItemSlot)?.label ?? addItemSlot;
+  const misfit = kb && kb.slot && !itemFitsSlot(kb, addItemSlot)
+    ? ` Note: ${kb.name} is a “${kb.slot}” item, added to ${slotLabel}.` : '';
   let item;
   try {
     item = await fetchItem(id);
@@ -544,14 +551,16 @@ async function addItemById(id, fallback = {}) {
       source: fallback.source ?? kb?.src ?? null,
       fetched: false,
     };
-    setAddStatus('Wowhead was unreachable — added with the info available. Use ↻ on the item to fetch its icon later.', 'warn');
+    setAddStatus(`Wowhead was unreachable — added with the info available. Use ↻ on the item to fetch its icon later.${misfit}`, 'warn');
   }
   if (slotsOf(lo, ph)[addItemSlot].includes(String(id))) {
     setAddStatus(`${item.name} is already in this slot.`, 'warn');
     return;
   }
   addItemToSlot(ch, lo, ph, addItemSlot, item);
-  if (item.fetched) setAddStatus(`Added ${item.name}. Add another, or close.`, 'ok');
+  if (item.fetched) {
+    setAddStatus(`Added ${item.name}.${misfit} Add another, or close.`, misfit ? 'warn' : 'ok');
+  }
   renderAll();
 }
 
@@ -589,9 +598,13 @@ async function runAddItemSearch(raw, { live = false } = {}) {
       return;
     }
   }
-  const results = searchItemDb(parsed.query);
+  const allSlots = $('#addItemAllSlots').checked;
+  const results = searchItemDb(parsed.query, { slotKey: allSlots ? null : addItemSlot });
   if (!results.length) {
-    if (!live) {
+    const slotLabel = SLOTS.find((s) => s.key === addItemSlot)?.label ?? addItemSlot;
+    if (!allSlots && searchItemDb(parsed.query, { slotKey: null }).length) {
+      setAddStatus(`No ${slotLabel} items match — matches exist in other slots. Tick “Search all slots” to see them.`, 'warn');
+    } else if (!live) {
       setAddStatus('No items found. Try part of the in-game name, or paste a Wowhead link / item ID.', 'warn');
     }
     $('#addItemResults').innerHTML = '';
@@ -600,6 +613,11 @@ async function runAddItemSearch(raw, { live = false } = {}) {
   setAddStatus(null);
   renderSearchResults(results);
 }
+
+// Re-run the search when the all-slots toggle changes.
+$('#addItemAllSlots').addEventListener('change', () => {
+  runAddItemSearch($('#addItemInput').value, { live: true });
+});
 
 // Live search while typing (the database is local, so this is instant).
 let searchDebounce = null;

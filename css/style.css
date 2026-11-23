@@ -585,6 +585,15 @@ dialog label input, dialog label select { display: block; width: 100%; margin-to
 
 .hint { color: #847a65; font-size: 12px; }
 
+.all-slots-toggle {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.all-slots-toggle input { accent-color: var(--gold); }
+
 .add-status {
   border-radius: 6px;
   padding: 8px 10px;

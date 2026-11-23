@@ -128,17 +128,48 @@ export function itemDbGet(id) {
 
 // ---- Search ----------------------------------------------------------------
 
+/** Which of the database's item slots fit each of the app's equipment slots. */
+export const SLOT_ITEM_TYPES = {
+  head: ['Head'],
+  neck: ['Neck'],
+  shoulder: ['Shoulder'],
+  back: ['Back'],
+  chest: ['Chest'],
+  wrist: ['Wrist'],
+  hands: ['Hands'],
+  waist: ['Waist'],
+  legs: ['Legs'],
+  feet: ['Feet'],
+  ring1: ['Finger'],
+  ring2: ['Finger'],
+  trinket1: ['Trinket'],
+  trinket2: ['Trinket'],
+  mainhand: ['Main Hand', 'One-Hand', 'Two-Hand'],
+  offhand: ['Off Hand', 'One-Hand', 'Held In Off-hand', 'Shield'],
+  ranged: ['Ranged', 'Relic', 'Thrown'],
+};
+
+/** Does this database item fit the given app slot? Unknown items pass. */
+export function itemFitsSlot(dbItem, slotKey) {
+  const allowed = SLOT_ITEM_TYPES[slotKey];
+  if (!allowed || !dbItem) return true;
+  return allowed.includes(dbItem.slot);
+}
+
 /**
  * Rank-ordered name search over the loaded index.
+ * `slotKey` (an app slot) limits results to items that fit that slot.
  * Prefers prefix > word-start > substring matches, then equippable items,
  * higher quality, and shorter names.
  */
-export function searchItemDb(query, limit = 12) {
+export function searchItemDb(query, { limit = 12, slotKey = null } = {}) {
   if (!itemIndex) return [];
   const q = query.trim().toLowerCase();
   if (q.length < 2) return [];
+  const allowed = slotKey ? SLOT_ITEM_TYPES[slotKey] : null;
   const scored = [];
   for (const item of itemIndex) {
+    if (allowed && !allowed.includes(item.slot)) continue;
     const name = item.name.toLowerCase();
     const idx = name.indexOf(q);
     if (idx === -1) continue;
@@ -146,11 +177,23 @@ export function searchItemDb(query, limit = 12) {
     scored.push([
       posScore * 1000
         + (item.slot ? 0 : 400)          // equippable first
+        + (item.src ? 0 : 5)             // entries with source info first
         + (10 - Math.min(item.q ?? 0, 9)) * 10
         + Math.min(item.name.length, 99) / 100,
       item,
     ]);
   }
   scored.sort((a, b) => a[0] - b[0]);
-  return scored.slice(0, limit).map((s) => s[1]);
+  // The game re-issues some items under new ids with no source data; show
+  // each name/slot/quality once, keeping the best-ranked (sourced) entry.
+  const seen = new Set();
+  const out = [];
+  for (const [, item] of scored) {
+    const key = `${item.name}|${item.slot}|${item.q}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+    if (out.length >= limit) break;
+  }
+  return out;
 }
