@@ -670,6 +670,17 @@ dialog label input, dialog label select { display: block; width: 100%; margin-to
   white-space: nowrap;
 }
 
+/* ---- Sync dialog ---- */
+
+.sync-steps { padding-left: 20px; color: var(--text-dim); font-size: 14px; }
+.sync-steps li { margin-bottom: 6px; }
+.sync-choice { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+.sync-connected { color: var(--ok); }
+.sync-meta { margin: 4px 0 10px; padding-left: 18px; }
+.sync-meta li { margin-bottom: 3px; }
+#syncDialog { width: min(520px, 92vw); }
+#syncStatus { margin-top: 10px; }
+
 /* ---- Footer ---- */
 
 .footer {

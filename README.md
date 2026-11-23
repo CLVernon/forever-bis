@@ -46,9 +46,15 @@ notes stay in sync across every loadout and phase that shares the item.
   tooltip API, and hovering an item shows the full Wowhead tooltip. If a lookup
   fails (offline, blocked), the item is still added and can be refreshed later
   with ↻.
+- **Sync between devices** — ⋯ → *Sync between devices* connects the tracker to
+  a secret GitHub gist in your own account (one gist-scope token, pasted once
+  per device). Changes upload automatically a few seconds after you make them,
+  other devices pull the latest on load, and if two devices diverge nothing is
+  overwritten — you pick a winner in the sync dialog. The token is stored only
+  in the browser, never in backups or share links.
 - **Local & private** — everything is stored in your browser's `localStorage`.
-  Use **⋯ → Export backup** for a JSON backup, and **Import backup** to restore it
-  (e.g. on another device).
+  Use **⋯ → Export backup** for a JSON backup, and **Import backup** to restore
+  it anywhere.
 
 ## Running it
 
@@ -74,6 +80,7 @@ ES modules load.)
 | `js/wowhead.js` | Wowhead URLs, tooltip-API fetch, source parsing, input parsing |
 | `js/itemdb.js` | Item-search index: same-origin `data/items.json`, fallbacks, IndexedDB cache |
 | `js/share.js` | Share-link encoding/decoding (deflate + base64url in the URL hash) |
+| `js/sync.js` | Cross-device sync via a secret GitHub gist (token stays in the browser) |
 | `js/app.js` | Rendering (slots / needed / overview views) and event handling |
 | `data/items.json` | Slim item index (id, name, quality, slot, source) the search runs on |
 | `data/sources.json` | Planner index: where each equippable item comes from (boss, zone, chance) |

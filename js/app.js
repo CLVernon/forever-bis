@@ -1,6 +1,6 @@
 import {
   SLOTS, CLASSES, QUALITY_COLORS,
-  state, save, load, replaceState, snapshot, uid,
+  state, save, load, replaceState, snapshot, uid, onSave,
   setReadOnly, isReadOnly,
   makeCharacter, makeLoadout,
   activeCharacter, activeLoadout, activePhase,
@@ -22,6 +22,11 @@ import {
 } from './itemdb.js';
 
 import { encodeShare, decodeShare } from './share.js';
+
+import {
+  syncConfig, saveSyncConfig, disconnectSync, hashString,
+  findGist, fetchGistData, fetchGistMeta, createGist, updateGist,
+} from './sync.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const app = $('#app');
@@ -808,6 +813,259 @@ function exitShare() {
   location.reload();
 }
 
+// ---- Cross-device sync (GitHub Gist) --------------------------------------
+
+const syncDialog = $('#syncDialog');
+let pendingCloud = null; // {data, updatedAt} awaiting a first-connect choice
+let syncBusy = false;
+
+function stateJson() {
+  return JSON.stringify(state);
+}
+
+function localChanged(cfg) {
+  return hashString(stateJson()) !== cfg.lastHash;
+}
+
+function setSyncStatus(msg, kind = 'info') {
+  const el = $('#syncStatus');
+  if (el) {
+    el.textContent = msg;
+    el.className = `add-status ${kind}`;
+    el.hidden = !msg;
+  }
+}
+
+function renderSyncDialog() {
+  const cfg = syncConfig();
+  const body = $('#syncBody');
+  if (pendingCloud) {
+    const chars = (pendingCloud.data.characters ?? []).map((c) => c.name).join(', ') || 'no characters';
+    body.innerHTML = `
+      <p>A copy of your tracker already exists in the cloud
+         (<b>${esc(chars)}</b>, last changed ${esc(new Date(pendingCloud.updatedAt).toLocaleString())}).
+         Which data should this device use?</p>
+      <div class="sync-choice">
+        <button class="btn btn-primary" data-sync="use-cloud">Use the cloud data here</button>
+        <button class="btn" data-sync="use-local">Replace the cloud with this device's data</button>
+      </div>
+      <div id="syncStatus" class="add-status" hidden></div>`;
+    return;
+  }
+  if (!cfg) {
+    body.innerHTML = `
+      <p>Keep your tracker identical on every device using a <b>secret GitHub gist</b>
+         — no account system, your data stays in your own GitHub.</p>
+      <ol class="sync-steps">
+        <li><a href="https://github.com/settings/tokens/new?scopes=gist&description=Forever%20BIS%20sync"
+               target="_blank" rel="noopener">Create a GitHub token</a>
+            (the <b>gist</b> scope is pre-selected — leave everything else off; pick a long expiration).</li>
+        <li>Copy the token and paste it below.</li>
+        <li>Paste the <em>same token</em> on your other devices — they find the same data automatically.</li>
+      </ol>
+      <label>GitHub token
+        <input id="syncToken" type="password" placeholder="ghp_…" autocomplete="off">
+      </label>
+      <p class="hint">The token is stored only in this browser and is never part of backups or share links.
+         It can do nothing on GitHub except read/write gists.</p>
+      <div class="dialog-actions" style="justify-content:flex-start">
+        <button class="btn btn-primary" data-sync="connect">Connect</button>
+      </div>
+      <div id="syncStatus" class="add-status" hidden></div>`;
+    return;
+  }
+  const dirty = localChanged(cfg);
+  body.innerHTML = `
+    <p class="sync-connected">✓ Connected — data syncs through a
+       <a href="${esc(cfg.gistUrl ?? '#')}" target="_blank" rel="noopener">secret gist</a> on your GitHub.</p>
+    <ul class="sync-meta hint">
+      <li>Changes on this device upload automatically a few seconds after you make them.</li>
+      <li>Cloud changes from other devices are pulled in when the app loads.</li>
+      <li>This device: ${dirty ? 'has changes not yet uploaded' : 'matches the last sync'}.</li>
+    </ul>
+    <div class="sync-choice">
+      <button class="btn btn-primary" data-sync="sync-now">Sync now</button>
+      <button class="btn" data-sync="upload" title="Overwrite the cloud with this device's data">Force upload</button>
+      <button class="btn" data-sync="download" title="Overwrite this device with the cloud data">Force download</button>
+      <button class="btn btn-ghost danger" data-sync="disconnect">Disconnect</button>
+    </div>
+    <div id="syncStatus" class="add-status" hidden></div>`;
+}
+
+function openSyncDialog() {
+  renderSyncDialog();
+  syncDialog.showModal();
+}
+
+/** Record a successful sync point (state and remote timestamp in agreement). */
+function markSynced(cfg, updatedAt, extra = {}) {
+  saveSyncConfig({ ...cfg, ...extra, lastHash: hashString(stateJson()), remoteUpdatedAt: updatedAt });
+}
+
+async function syncUpload(cfg) {
+  const gist = await updateGist(cfg.token, cfg.gistId, stateJson());
+  markSynced(cfg, gist.updated_at);
+}
+
+async function syncDownload(cfg) {
+  const { data, updatedAt } = await fetchGistData(cfg.token, cfg.gistId);
+  replaceState(data);
+  markSynced(cfg, updatedAt);
+  renderAll();
+}
+
+async function connectSync(token) {
+  setSyncStatus('Connecting to GitHub…');
+  const gist = await findGist(token);
+  if (!gist) {
+    setSyncStatus('Creating your sync gist…');
+    const created = await createGist(token, stateJson());
+    saveSyncConfig({ token, gistId: created.id, gistUrl: created.html_url });
+    markSynced(syncConfig(), created.updated_at);
+    renderSyncDialog();
+    showToast('Sync connected — this device\'s data is now in the cloud.', null);
+    return;
+  }
+  const cloud = await fetchGistData(token, gist.id);
+  saveSyncConfig({ token, gistId: gist.id, gistUrl: cloud.url, lastHash: null, remoteUpdatedAt: null });
+  const localHasData = state.characters.length > 0;
+  const cloudHasData = (cloud.data?.characters ?? []).length > 0;
+  if (cloudHasData && localHasData) {
+    pendingCloud = cloud; // let the user choose a winner
+    renderSyncDialog();
+    return;
+  }
+  if (cloudHasData) {
+    replaceState(cloud.data);
+    markSynced(syncConfig(), cloud.updatedAt);
+    renderAll();
+  } else {
+    await syncUpload(syncConfig());
+  }
+  renderSyncDialog();
+  showToast('Sync connected.', null);
+}
+
+async function handleSyncAction(action) {
+  if (syncBusy) return;
+  syncBusy = true;
+  const cfg = syncConfig();
+  try {
+    switch (action) {
+      case 'connect': {
+        const token = $('#syncToken').value.trim();
+        if (!token) { setSyncStatus('Paste a token first.', 'warn'); break; }
+        await connectSync(token);
+        break;
+      }
+      case 'use-cloud':
+        replaceState(pendingCloud.data);
+        markSynced(syncConfig(), pendingCloud.updatedAt);
+        pendingCloud = null;
+        renderAll();
+        renderSyncDialog();
+        setSyncStatus('Using the cloud data on this device.', 'ok');
+        break;
+      case 'use-local':
+        await syncUpload(syncConfig());
+        pendingCloud = null;
+        renderSyncDialog();
+        setSyncStatus('Cloud replaced with this device\'s data.', 'ok');
+        break;
+      case 'sync-now': {
+        setSyncStatus('Checking the cloud…');
+        const meta = await fetchGistMeta(cfg.token, cfg.gistId);
+        const remoteChanged = meta.updatedAt !== cfg.remoteUpdatedAt;
+        const dirty = localChanged(cfg);
+        if (!remoteChanged && !dirty) setSyncStatus('Everything is in sync.', 'ok');
+        else if (remoteChanged && dirty) {
+          setSyncStatus('Both this device and the cloud changed since the last sync — pick Force upload or Force download.', 'warn');
+        } else if (dirty) {
+          await syncUpload(cfg);
+          renderSyncDialog();
+          setSyncStatus('Uploaded this device\'s changes.', 'ok');
+        } else {
+          await syncDownload(cfg);
+          renderSyncDialog();
+          setSyncStatus('Downloaded the cloud changes.', 'ok');
+        }
+        break;
+      }
+      case 'upload':
+        if (confirm('Overwrite the CLOUD data with this device\'s data?')) {
+          await syncUpload(cfg);
+          renderSyncDialog();
+          setSyncStatus('Cloud overwritten with this device\'s data.', 'ok');
+        }
+        break;
+      case 'download':
+        if (confirm('Overwrite THIS DEVICE\'s data with the cloud data?')) {
+          await syncDownload(cfg);
+          renderSyncDialog();
+          setSyncStatus('This device now matches the cloud.', 'ok');
+        }
+        break;
+      case 'disconnect':
+        if (confirm('Disconnect sync on this device? The cloud copy and other devices are unaffected.')) {
+          disconnectSync();
+          renderSyncDialog();
+        }
+        break;
+    }
+  } catch (e) {
+    setSyncStatus(e.message === 'unauthorized'
+      ? 'GitHub rejected the token. Create a new one (gist scope) and reconnect.'
+      : 'Sync failed — are you online? Try again in a moment.', 'warn');
+  } finally {
+    syncBusy = false;
+  }
+}
+
+$('#syncBody').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-sync]');
+  if (btn) handleSyncAction(btn.dataset.sync);
+});
+
+// Auto-upload a few seconds after local changes (never over newer cloud data).
+let autoPushTimer = null;
+let divergenceToastShown = false;
+onSave(() => {
+  const cfg = syncConfig();
+  if (!cfg || isReadOnly()) return;
+  clearTimeout(autoPushTimer);
+  autoPushTimer = setTimeout(async () => {
+    const current = syncConfig();
+    if (!current || !localChanged(current)) return;
+    try {
+      const meta = await fetchGistMeta(current.token, current.gistId);
+      if (meta.updatedAt !== current.remoteUpdatedAt) {
+        if (!divergenceToastShown) {
+          divergenceToastShown = true;
+          showToast('Sync: the cloud has newer data from another device — open ⋯ → Sync to resolve.', null);
+        }
+        return;
+      }
+      await syncUpload(current);
+    } catch { /* quietly retry on the next change */ }
+  }, 4000);
+});
+
+// On load: pull cloud changes when this device has none of its own.
+async function syncBootCheck() {
+  const cfg = syncConfig();
+  if (!cfg || isReadOnly()) return;
+  try {
+    const meta = await fetchGistMeta(cfg.token, cfg.gistId);
+    if (meta.updatedAt === cfg.remoteUpdatedAt) return; // cloud unchanged
+    if (!localChanged(cfg)) {
+      await syncDownload(cfg);
+      showToast('Synced: loaded the latest data from the cloud.', null);
+    } else {
+      showToast('Sync: this device and the cloud both changed — open ⋯ → Sync to resolve.', null);
+    }
+  } catch { /* offline is fine; local data stands */ }
+}
+
 // ---- Export / import ----------------------------------------------------
 
 function exportBackup() {
@@ -863,6 +1121,7 @@ $('#menu').addEventListener('click', (e) => {
       }
       break;
     case 'share': openShareDialog(); break;
+    case 'sync': openSyncDialog(); break;
     case 'export': exportBackup(); break;
     case 'import': $('#importFile').click(); break;
   }
@@ -981,7 +1240,7 @@ $('#addItemResults').addEventListener('click', (e) => {
 });
 
 // Close buttons for all dialogs
-for (const dlg of [charDialog, nameDialog, addItemDialog, copyDialog, shareDialog]) {
+for (const dlg of [charDialog, nameDialog, addItemDialog, copyDialog, shareDialog, syncDialog]) {
   dlg.addEventListener('click', (e) => {
     if (e.target.matches('[data-close]')) dlg.close();
   });
@@ -1193,6 +1452,7 @@ async function boot() {
     }
   }
   renderAll();
+  syncBootCheck();
 }
 
 boot();

@@ -32,6 +32,7 @@
         <button data-menu="delete-char" class="danger">Delete character</button>
         <hr>
         <button data-menu="share">Share character link…</button>
+        <button data-menu="sync">Sync between devices…</button>
         <hr>
         <button data-menu="export">Export backup (JSON)</button>
         <button data-menu="import">Import backup…</button>
@@ -142,6 +143,15 @@
   <div class="dialog-actions">
     <button type="button" class="btn btn-ghost" data-close>Close</button>
     <button type="button" class="btn btn-primary" id="copyShareUrl">Copy link</button>
+  </div>
+</dialog>
+
+<!-- Sync between devices -->
+<dialog id="syncDialog">
+  <h2>Sync between devices</h2>
+  <div id="syncBody"></div>
+  <div class="dialog-actions">
+    <button type="button" class="btn btn-ghost" data-close>Close</button>
   </div>
 </dialog>
 

@@ -221,6 +221,12 @@ export function load() {
   }
 }
 
+const saveListeners = new Set();
+/** Register a callback that runs after every successful save (e.g. auto-sync). */
+export function onSave(fn) {
+  saveListeners.add(fn);
+}
+
 export const state = load();
 // Persist immediately so migrations (schema upgrades) are written back.
 save();
@@ -231,6 +237,10 @@ export function save() {
     localStorage.setItem(KEY, JSON.stringify(state));
   } catch (e) {
     console.error('Failed to save', e);
+    return;
+  }
+  for (const fn of saveListeners) {
+    try { fn(); } catch { /* listener errors must not break saves */ }
   }
 }
 
