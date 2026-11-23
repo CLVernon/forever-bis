@@ -73,29 +73,6 @@ export async function fetchItem(id) {
 }
 
 /**
- * Best-effort item search by name via Wowhead's suggestion endpoint.
- * May be blocked by CORS in some browsers — callers must handle rejection.
- * Returns [{ id, name, quality, icon }].
- */
-export async function searchItems(query) {
-  const url = `https://www.wowhead.com${BRANCH}/search/suggestions-template?q=${encodeURIComponent(query)}`;
-  const data = await fetchJson(url);
-  const out = [];
-  for (const r of data?.results ?? []) {
-    // type 3 = item in Wowhead's suggestion payloads
-    if (r && r.type === 3 && r.id != null) {
-      out.push({
-        id: String(r.id),
-        name: r.name?.replace(/^[0-9]/, '') ?? String(r.id),
-        quality: typeof r.quality === 'number' ? r.quality : null,
-        icon: r.icon || null,
-      });
-    }
-  }
-  return out;
-}
-
-/**
  * Interpret user input in the add-item box:
  *  - a Wowhead item URL  -> { id, name? }
  *  - a bare numeric ID   -> { id }

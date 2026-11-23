@@ -12,8 +12,10 @@ import {
 } from './store.js';
 
 import {
-  itemUrl, searchUrl, iconUrl, fetchItem, searchItems, parseItemInput,
+  itemUrl, searchUrl, iconUrl, fetchItem, parseItemInput,
 } from './wowhead.js';
+
+import { loadItemDb, searchItemDb, itemDbGet, itemDbReady } from './itemdb.js';
 
 import { encodeShare, decodeShare } from './share.js';
 
@@ -520,18 +522,29 @@ function setAddStatus(msg, kind = 'info') {
 
 // ---- Add-item flow ------------------------------------------------------
 
-async function addItemById(id, fallbackName) {
+async function addItemById(id, fallback = {}) {
   const ch = activeCharacter();
   const lo = activeLoadout(ch);
   const ph = activePhase();
   if (!ch || !lo || !ph || !addItemSlot) return;
   setAddStatus('Fetching item details from Wowhead…');
+  // The local database may know the item too (name, quality, source with drop chance).
+  const kb = itemDbGet(id);
   let item;
   try {
     item = await fetchItem(id);
+    // Prefer the database's source line: it includes drop chances and zones.
+    if (kb?.src) item.source = kb.src;
   } catch {
-    item = { id: String(id), name: fallbackName || `Item ${id}`, quality: null, icon: null, source: null, fetched: false };
-    setAddStatus('Could not fetch details (offline or blocked) — added with the info available. Use ↻ on the item to retry.', 'warn');
+    item = {
+      id: String(id),
+      name: fallback.name ?? kb?.name ?? `Item ${id}`,
+      quality: fallback.quality ?? kb?.q ?? null,
+      icon: null,
+      source: fallback.source ?? kb?.src ?? null,
+      fetched: false,
+    };
+    setAddStatus('Wowhead was unreachable — added with the info available. Use ↻ on the item to fetch its icon later.', 'warn');
   }
   if (slotsOf(lo, ph)[addItemSlot].includes(String(id))) {
     setAddStatus(`${item.name} is already in this slot.`, 'warn');
@@ -542,33 +555,59 @@ async function addItemById(id, fallbackName) {
   renderAll();
 }
 
-async function runAddItemSearch(raw) {
+function renderSearchResults(results) {
+  $('#addItemResults').innerHTML = results.map((r) => `
+    <button type="button" class="search-result" data-result-id="${r.id}"
+      data-result-name="${esc(r.name)}" data-result-quality="${r.q ?? ''}"
+      data-result-source="${esc(r.src)}">
+      <span class="sr-main">
+        <span style="color:${qColor(r.q)}">${esc(r.name)}</span>
+        ${r.slot ? `<span class="sr-slot">${esc(r.slot)}</span>` : ''}
+      </span>
+      ${r.src ? `<span class="sr-src">${esc(r.src)}</span>` : ''}
+    </button>`).join('');
+}
+
+async function runAddItemSearch(raw, { live = false } = {}) {
   const parsed = parseItemInput(raw);
-  if (!parsed) return;
-  if (parsed.id) { await addItemById(parsed.id, parsed.name); return; }
+  if (!parsed) { $('#addItemResults').innerHTML = ''; return; }
+  if (parsed.id) {
+    if (!live) await addItemById(parsed.id, { name: parsed.name });
+    return;
+  }
 
   $('#addItemWowheadLink').href = searchUrl(parsed.query);
-  setAddStatus('Searching Wowhead…');
-  try {
-    const results = await searchItems(parsed.query);
-    if (!results.length) {
-      setAddStatus('No items found. Try the exact in-game name, or paste a Wowhead link / item ID.', 'warn');
+  if (!itemDbReady()) {
+    try {
+      setAddStatus('Loading the item database…');
+      await loadItemDb((msg) => setAddStatus(msg));
+      setAddStatus(null);
+    } catch {
+      setAddStatus('Could not load the item database (offline?). ' +
+        'Open the Wowhead link below, find your item, and paste its link or ID here.', 'warn');
       $('#addItemResults').innerHTML = '';
       return;
     }
-    setAddStatus(null);
-    $('#addItemResults').innerHTML = results.slice(0, 12).map((r) => `
-      <button type="button" class="search-result" data-result-id="${r.id}" data-result-name="${esc(r.name)}">
-        <img src="${iconUrl(r.icon, 'small')}" alt="" loading="lazy">
-        <span style="color:${qColor(r.quality)}">${esc(r.name)}</span>
-        <span class="hint">#${r.id}</span>
-      </button>`).join('');
-  } catch {
-    setAddStatus('Name search is unavailable in this browser (blocked by Wowhead). ' +
-      'Open the Wowhead link below, find your item, and paste its link or ID here.', 'warn');
-    $('#addItemResults').innerHTML = '';
   }
+  const results = searchItemDb(parsed.query);
+  if (!results.length) {
+    if (!live) {
+      setAddStatus('No items found. Try part of the in-game name, or paste a Wowhead link / item ID.', 'warn');
+    }
+    $('#addItemResults').innerHTML = '';
+    return;
+  }
+  setAddStatus(null);
+  renderSearchResults(results);
 }
+
+// Live search while typing (the database is local, so this is instant).
+let searchDebounce = null;
+$('#addItemInput').addEventListener('input', (e) => {
+  clearTimeout(searchDebounce);
+  const value = e.target.value;
+  searchDebounce = setTimeout(() => runAddItemSearch(value, { live: true }), 200);
+});
 
 // ---- Share mode -----------------------------------------------------------
 
@@ -776,7 +815,13 @@ $('#addItemForm').addEventListener('submit', (e) => {
 
 $('#addItemResults').addEventListener('click', (e) => {
   const btn = e.target.closest('.search-result');
-  if (btn) addItemById(btn.dataset.resultId, btn.dataset.resultName);
+  if (btn) {
+    addItemById(btn.dataset.resultId, {
+      name: btn.dataset.resultName,
+      quality: btn.dataset.resultQuality === '' ? null : Number(btn.dataset.resultQuality),
+      source: btn.dataset.resultSource || null,
+    });
+  }
 });
 
 // Close buttons for all dialogs
