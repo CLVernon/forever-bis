@@ -1041,7 +1041,7 @@ app.addEventListener('click', (e) => {
       }
       break;
     case 'delete-loadout':
-      if (lo) {
+      if (lo && confirm(`Are you sure you want to delete the loadout “${lo.name}” and all its goals in every phase?`)) {
         withUndo(`Deleted loadout “${lo.name}”.`, () => {
           ch.loadouts = ch.loadouts.filter((l) => l.id !== lo.id);
           setActiveLoadout(ch, ch.loadouts[0]?.id ?? null);
@@ -1050,7 +1050,7 @@ app.addEventListener('click', (e) => {
       }
       break;
     case 'delete-phase':
-      if (ph && confirm(`Delete phase “${ph.name}” from ALL loadouts on ALL characters?`)) {
+      if (ph && confirm(`Are you sure you want to delete the phase “${ph.name}”? It is removed from ALL loadouts on ALL characters, with all its goals.`)) {
         withUndo(`Deleted phase “${ph.name}”.`, () => deletePhase(ph));
       }
       break;
