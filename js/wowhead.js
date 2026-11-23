@@ -1,24 +1,19 @@
-// Wowhead integration: item page URLs, icon URLs, tooltip-JSON fetch and
-// (best-effort) name search. Everything degrades gracefully — if the network
-// or CORS blocks a request, the app falls back to manual entry and the
-// official Wowhead hover-tooltip widget still works (it is script-based).
+// Wowhead integration (WoW: Forever database): item page URLs, icon URLs,
+// tooltip-JSON fetch and (best-effort) name search. Everything degrades
+// gracefully — if the network or CORS blocks a request, the app falls back
+// to manual entry and the official Wowhead hover-tooltip widget still works
+// (it is script-based).
 
-import { GAME_VERSIONS } from './store.js';
-
+const BRANCH = '/forever';
 const PLACEHOLDER_ICON = 'inv_misc_questionmark';
 
-function branchPath(version) {
-  const path = GAME_VERSIONS[version]?.path ?? 'forever';
-  return path ? `/${path}` : '';
+/** Item page on Wowhead (also drives the hover tooltip). */
+export function itemUrl(id) {
+  return `https://www.wowhead.com${BRANCH}/item=${id}`;
 }
 
-/** Item page on Wowhead for the right game version (also drives the hover tooltip). */
-export function itemUrl(version, id) {
-  return `https://www.wowhead.com${branchPath(version)}/item=${id}`;
-}
-
-export function searchUrl(version, query) {
-  return `https://www.wowhead.com${branchPath(version)}/search?q=${encodeURIComponent(query)}`;
+export function searchUrl(query) {
+  return `https://www.wowhead.com${BRANCH}/search?q=${encodeURIComponent(query)}`;
 }
 
 export function iconUrl(icon, size = 'medium') {
@@ -36,9 +31,9 @@ async function fetchJson(url) {
  * the same endpoint the official widget uses, served with CORS headers.
  * Throws on failure.
  */
-export async function fetchItem(version, id) {
+export async function fetchItem(id) {
   const data = await fetchJson(
-    `https://nether.wowhead.com${branchPath(version)}/tooltip/item/${id}?locale=0`);
+    `https://nether.wowhead.com${BRANCH}/tooltip/item/${id}?locale=0`);
   let name = data.name;
   let quality = typeof data.quality === 'number' ? data.quality : null;
   if ((!name || quality === null) && typeof data.tooltip === 'string') {
@@ -57,8 +52,8 @@ export async function fetchItem(version, id) {
  * May be blocked by CORS in some browsers — callers must handle rejection.
  * Returns [{ id, name, quality, icon }].
  */
-export async function searchItems(version, query) {
-  const url = `https://www.wowhead.com${branchPath(version)}/search/suggestions-template?q=${encodeURIComponent(query)}`;
+export async function searchItems(query) {
+  const url = `https://www.wowhead.com${BRANCH}/search/suggestions-template?q=${encodeURIComponent(query)}`;
   const data = await fetchJson(url);
   const out = [];
   for (const r of data?.results ?? []) {

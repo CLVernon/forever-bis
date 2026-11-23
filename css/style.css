@@ -211,6 +211,20 @@ select:focus, input:focus, textarea:focus {
   padding-bottom: 8px;
   margin-bottom: 16px;
 }
+.tabs-phases {
+  border-bottom: 0;
+  margin-bottom: 6px;
+  padding-bottom: 0;
+}
+.tabs-phases .tab { border-radius: 20px; padding: 5px 14px; }
+.tabs-phases .tab.active { background: #2c2415; }
+.tabs-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #847a65;
+  min-width: 56px;
+}
 .tab {
   background: var(--bg-raise);
   border: 1px solid var(--border);

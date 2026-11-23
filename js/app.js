@@ -1,9 +1,11 @@
 import {
-  SLOTS, GAME_VERSIONS, CLASSES, QUALITY_COLORS,
-  state, save, replaceState, uid,
+  SLOTS, CLASSES, QUALITY_COLORS,
+  state, save, replaceState,
   makeCharacter, makeLoadout,
-  activeCharacter, activeLoadout, setActiveLoadout,
-  addItemToSlot, removeItemFromSlot, moveItemInSlot, loadoutsUsingItem,
+  activeCharacter, activeLoadout, activePhase,
+  setActiveLoadout, setActivePhase, slotsOf,
+  addPhase, renamePhase, deletePhase,
+  addItemToSlot, removeItemFromSlot, moveItemInSlot, placesUsingItem,
 } from './store.js';
 
 import {
@@ -41,7 +43,6 @@ function renderTopbar() {
   ).join('');
   const hasChar = state.characters.length > 0;
   sel.hidden = !hasChar;
-  $('#menuBtn').hidden = false;
   $('[data-menu="edit-char"]').disabled = !hasChar;
   $('[data-menu="delete-char"]').disabled = !hasChar;
 }
@@ -52,35 +53,71 @@ function renderMain() {
     app.innerHTML = `
       <section class="welcome">
         <h2>Track your Best-in-Slot goals</h2>
-        <p>Create a character, set up loadouts (specs), and add goal items to each
-           equipment slot. Mark items obtained and keep notes on how to get them —
-           shared items stay in sync across all loadouts.</p>
+        <p>Create a character, set up loadouts (specs) and phases (e.g. Pre Raid,
+           Tier 1), and add goal items to each equipment slot. Mark items obtained
+           and keep notes on how to get them — shared items stay in sync across
+           all loadouts and phases.</p>
         <button class="btn btn-primary btn-lg" data-action="new-char">Create your first character</button>
       </section>`;
     return;
   }
 
   const lo = activeLoadout(ch);
+  const ph = activePhase();
   const cls = CLASSES[ch.cls];
-  const verLabel = GAME_VERSIONS[ch.version]?.label ?? '';
 
-  const tabs = ch.loadouts.map((l) => `
+  const phaseTabs = state.phases.map((p) => `
+    <button class="tab ${ph && p.id === ph.id ? 'active' : ''}" data-action="pick-phase" data-id="${p.id}">
+      ${esc(p.name)}
+    </button>`).join('');
+
+  const loadoutTabs = ch.loadouts.map((l) => `
     <button class="tab ${lo && l.id === lo.id ? 'active' : ''}" data-action="pick-loadout" data-id="${l.id}">
       ${esc(l.name)}
     </button>`).join('');
+
+  let body;
+  if (!lo) {
+    body = `
+      <section class="welcome">
+        <p>No loadouts yet. A loadout is a goal set for one spec or purpose —
+           e.g. <em>Enhancement</em>, <em>Elemental</em>, <em>Restoration</em>.</p>
+        <button class="btn btn-primary" data-action="new-loadout">Create a loadout</button>
+      </section>`;
+  } else if (!ph) {
+    body = `
+      <section class="welcome">
+        <p>No phases yet. A phase is a stage of gearing — e.g. <em>Pre Raid</em>,
+           <em>Tier 1</em>. Phases are shared by every loadout on every character.</p>
+        <button class="btn btn-primary" data-action="new-phase">Create a phase</button>
+      </section>`;
+  } else {
+    body = slotsHtml(ch, lo, ph);
+  }
 
   app.innerHTML = `
     <section class="char-head">
       <div class="char-id">
         <h2 style="color:${cls.color}">${esc(ch.name)}</h2>
-        <span class="char-sub">${esc([ch.race, cls.label !== 'Other' ? cls.label : ''].filter(Boolean).join(' '))}
-          <span class="ver-chip">${esc(verLabel)}</span></span>
+        <span class="char-sub">${esc([ch.race, cls.label !== 'Other' ? cls.label : ''].filter(Boolean).join(' '))}</span>
       </div>
-      ${lo ? progressHtml(ch, lo) : ''}
+      ${lo && ph ? progressHtml(ch, lo, ph) : ''}
     </section>
 
+    <nav class="tabs tabs-phases">
+      <span class="tabs-label">Phase</span>
+      ${phaseTabs}
+      <button class="tab tab-add" data-action="new-phase" title="Add a phase (added to all loadouts on all characters)">+ Phase</button>
+      ${ph ? `
+        <span class="tab-tools">
+          <button class="icon-btn" data-action="rename-phase" title="Rename phase">✎</button>
+          <button class="icon-btn danger" data-action="delete-phase" title="Delete phase">🗑</button>
+        </span>` : ''}
+    </nav>
+
     <nav class="tabs">
-      ${tabs}
+      <span class="tabs-label">Loadout</span>
+      ${loadoutTabs}
       <button class="tab tab-add" data-action="new-loadout" title="Add loadout">+ Loadout</button>
       ${lo ? `
         <span class="tab-tools">
@@ -89,22 +126,18 @@ function renderMain() {
         </span>` : ''}
     </nav>
 
-    ${lo ? slotsHtml(ch, lo) : `
-      <section class="welcome">
-        <p>No loadouts yet. A loadout is a goal set for one spec or purpose —
-           e.g. <em>Enhancement</em>, <em>Elemental</em>, <em>Restoration</em>.</p>
-        <button class="btn btn-primary" data-action="new-loadout">Create a loadout</button>
-      </section>`}
+    ${body}
   `;
 }
 
-function progressHtml(ch, lo) {
-  const ids = new Set(Object.values(lo.slots).flat());
+function progressHtml(ch, lo, ph) {
+  const slots = slotsOf(lo, ph);
+  const ids = new Set(Object.values(slots).flat());
   const total = ids.size;
   let got = 0;
   for (const id of ids) if (ch.items[id]?.obtained) got++;
-  const filledSlots = SLOTS.filter((s) => lo.slots[s.key].length > 0);
-  const doneSlots = filledSlots.filter((s) => lo.slots[s.key].some((id) => ch.items[id]?.obtained));
+  const filledSlots = SLOTS.filter((s) => slots[s.key].length > 0);
+  const doneSlots = filledSlots.filter((s) => slots[s.key].some((id) => ch.items[id]?.obtained));
   const pct = total ? Math.round((got / total) * 100) : 0;
   return `
     <div class="progress">
@@ -116,12 +149,13 @@ function progressHtml(ch, lo) {
     </div>`;
 }
 
-function slotsHtml(ch, lo) {
+function slotsHtml(ch, lo, ph) {
+  const slots = slotsOf(lo, ph);
   const cards = SLOTS.map((s) => {
-    const items = lo.slots[s.key].map((id, i) =>
-      itemRowHtml(ch, lo, s.key, id, i, lo.slots[s.key].length)).join('');
+    const items = slots[s.key].map((id, i) =>
+      itemRowHtml(ch, lo, ph, s.key, id, i, slots[s.key].length)).join('');
     return `
-      <article class="slot-card ${lo.slots[s.key].some((id) => ch.items[id]?.obtained) ? 'slot-done' : ''}">
+      <article class="slot-card ${slots[s.key].some((id) => ch.items[id]?.obtained) ? 'slot-done' : ''}">
         <header class="slot-head">
           <h3>${s.label}</h3>
           <button class="icon-btn add" data-action="add-item" data-slot="${s.key}" title="Add goal item to ${s.label}">+</button>
@@ -132,10 +166,10 @@ function slotsHtml(ch, lo) {
   return `<section class="slots">${cards}</section>`;
 }
 
-function itemRowHtml(ch, lo, slotKey, itemId, index, count) {
+function itemRowHtml(ch, lo, ph, slotKey, itemId, index, count) {
   const item = ch.items[itemId] ?? { id: itemId, name: `Item ${itemId}`, quality: null, icon: null };
-  const elsewhere = loadoutsUsingItem(ch, itemId, lo.id);
-  const noteOpen = openNotes.has(`${lo.id}/${slotKey}/${itemId}`);
+  const elsewhere = placesUsingItem(ch, itemId, lo.id, ph.id);
+  const noteOpen = openNotes.has(`${lo.id}/${ph.id}/${slotKey}/${itemId}`);
   const key = `data-slot="${slotKey}" data-item="${itemId}"`;
   return `
   <div class="item-row ${item.obtained ? 'obtained' : ''}">
@@ -144,7 +178,7 @@ function itemRowHtml(ch, lo, slotKey, itemId, index, count) {
         <input type="checkbox" data-action="toggle-obtained" ${key} ${item.obtained ? 'checked' : ''}>
         <span class="obtain-box"></span>
       </label>
-      <a class="item-link" href="${itemUrl(ch.version, itemId)}" target="_blank" rel="noopener"
+      <a class="item-link" href="${itemUrl(itemId)}" target="_blank" rel="noopener"
          data-wh-icon-size="medium">
         <img class="item-icon" src="${iconUrl(item.icon)}" alt="" loading="lazy">
         <span class="item-name" style="color:${qColor(item.quality)}">${esc(item.name)}</span>
@@ -176,22 +210,19 @@ function refreshTooltips() {
 // ---- Dialog helpers -----------------------------------------------------
 
 const charDialog = $('#charDialog');
-const loadoutDialog = $('#loadoutDialog');
+const nameDialog = $('#nameDialog');
 const addItemDialog = $('#addItemDialog');
 let editingCharId = null;
-let loadoutMode = 'new'; // or 'rename'
+let nameMode = 'new-loadout'; // new-loadout | rename-loadout | new-phase | rename-phase
 let addItemSlot = null;
 
 function fillCharForm(ch) {
   const f = $('#charForm');
   f.cls.innerHTML = Object.entries(CLASSES).map(([k, v]) =>
     `<option value="${k}">${v.label}</option>`).join('');
-  f.version.innerHTML = Object.entries(GAME_VERSIONS).map(([k, v]) =>
-    `<option value="${k}">${v.label}</option>`).join('');
   f.name.value = ch?.name ?? '';
   f.race.value = ch?.race ?? '';
   f.cls.value = ch?.cls ?? 'other';
-  f.version.value = ch?.version ?? 'forever';
 }
 
 function openCharDialog(ch = null) {
@@ -201,22 +232,32 @@ function openCharDialog(ch = null) {
   charDialog.showModal();
 }
 
-function openLoadoutDialog(mode) {
-  loadoutMode = mode;
-  const lo = activeLoadout();
-  $('#loadoutDialogTitle').textContent = mode === 'rename' ? 'Rename loadout' : 'New loadout';
-  $('#loadoutForm').name.value = mode === 'rename' ? (lo?.name ?? '') : '';
-  loadoutDialog.showModal();
+function openNameDialog(mode) {
+  nameMode = mode;
+  const titles = {
+    'new-loadout': 'New loadout',
+    'rename-loadout': 'Rename loadout',
+    'new-phase': 'New phase',
+    'rename-phase': 'Rename phase',
+  };
+  const isPhase = mode.endsWith('phase');
+  const current = mode === 'rename-loadout' ? activeLoadout()?.name
+    : mode === 'rename-phase' ? activePhase()?.name : '';
+  const f = $('#nameForm');
+  $('#nameDialogTitle').textContent = titles[mode];
+  $('#nameDialogHint').hidden = !isPhase;
+  f.name.placeholder = isPhase ? 'Pre Raid' : 'Enhancement';
+  f.name.value = current ?? '';
+  nameDialog.showModal();
 }
 
 function openAddItemDialog(slotKey) {
   addItemSlot = slotKey;
-  const ch = activeCharacter();
   $('#addItemSlotName').textContent = SLOTS.find((s) => s.key === slotKey)?.label ?? slotKey;
   $('#addItemInput').value = '';
   $('#addItemResults').innerHTML = '';
   setAddStatus(null);
-  $('#addItemWowheadLink').href = searchUrl(ch.version, '');
+  $('#addItemWowheadLink').href = searchUrl('');
   addItemDialog.showModal();
   $('#addItemInput').focus();
 }
@@ -234,35 +275,35 @@ function setAddStatus(msg, kind = 'info') {
 async function addItemById(id, fallbackName) {
   const ch = activeCharacter();
   const lo = activeLoadout(ch);
-  if (!ch || !lo || !addItemSlot) return;
+  const ph = activePhase();
+  if (!ch || !lo || !ph || !addItemSlot) return;
   setAddStatus('Fetching item details from Wowhead…');
   let item;
   try {
-    item = await fetchItem(ch.version, id);
+    item = await fetchItem(id);
   } catch {
     item = { id: String(id), name: fallbackName || `Item ${id}`, quality: null, icon: null, fetched: false };
     setAddStatus('Could not fetch details (offline or blocked) — added with the info available. Use ↻ on the item to retry.', 'warn');
   }
-  if (lo.slots[addItemSlot].includes(String(id))) {
+  if (slotsOf(lo, ph)[addItemSlot].includes(String(id))) {
     setAddStatus(`${item.name} is already in this slot.`, 'warn');
     return;
   }
-  addItemToSlot(ch, lo, addItemSlot, item);
+  addItemToSlot(ch, lo, ph, addItemSlot, item);
   if (item.fetched) setAddStatus(`Added ${item.name}. Add another, or close.`, 'ok');
   renderAll();
 }
 
 async function runAddItemSearch(raw) {
-  const ch = activeCharacter();
   const parsed = parseItemInput(raw);
   if (!parsed) return;
   if (parsed.id) { await addItemById(parsed.id, parsed.name); return; }
 
   // Name search
-  $('#addItemWowheadLink').href = searchUrl(ch.version, parsed.query);
+  $('#addItemWowheadLink').href = searchUrl(parsed.query);
   setAddStatus('Searching Wowhead…');
   try {
-    const results = await searchItems(ch.version, parsed.query);
+    const results = await searchItems(parsed.query);
     if (!results.length) {
       setAddStatus('No items found. Try the exact in-game name, or paste a Wowhead link / item ID.', 'warn');
       $('#addItemResults').innerHTML = '';
@@ -362,7 +403,6 @@ $('#charForm').addEventListener('submit', () => {
     name: f.name.value.trim(),
     race: f.race.value.trim(),
     cls: f.cls.value,
-    version: f.version.value,
   };
   if (!data.name) return;
   if (editingCharId) {
@@ -377,19 +417,30 @@ $('#charForm').addEventListener('submit', () => {
   renderAll();
 });
 
-// Dialog: loadout save
-$('#loadoutForm').addEventListener('submit', () => {
-  const name = $('#loadoutForm').name.value.trim();
+// Dialog: loadout / phase save
+$('#nameForm').addEventListener('submit', () => {
+  const name = $('#nameForm').name.value.trim();
   if (!name) return;
   const ch = activeCharacter();
-  if (!ch) return;
-  if (loadoutMode === 'rename') {
-    const lo = activeLoadout(ch);
-    if (lo) lo.name = name;
-  } else {
-    const lo = makeLoadout(name);
-    ch.loadouts.push(lo);
-    setActiveLoadout(ch, lo.id);
+  switch (nameMode) {
+    case 'new-loadout': {
+      if (!ch) return;
+      const lo = makeLoadout(name);
+      ch.loadouts.push(lo);
+      setActiveLoadout(ch, lo.id);
+      break;
+    }
+    case 'rename-loadout': {
+      const lo = activeLoadout(ch);
+      if (lo) lo.name = name;
+      break;
+    }
+    case 'new-phase': addPhase(name); break;
+    case 'rename-phase': {
+      const ph = activePhase();
+      if (ph) renamePhase(ph, name);
+      break;
+    }
   }
   save();
   renderAll();
@@ -407,7 +458,7 @@ $('#addItemResults').addEventListener('click', (e) => {
 });
 
 // Close buttons for all dialogs
-for (const dlg of [charDialog, loadoutDialog, addItemDialog]) {
+for (const dlg of [charDialog, nameDialog, addItemDialog]) {
   dlg.addEventListener('click', (e) => {
     if (e.target.matches('[data-close]')) dlg.close();
   });
@@ -419,12 +470,15 @@ app.addEventListener('click', (e) => {
   if (!btn || btn.matches('input,textarea')) return;
   const ch = activeCharacter();
   const lo = activeLoadout(ch);
+  const ph = activePhase();
   const { action, slot, item: itemId, id } = btn.dataset;
 
   switch (action) {
     case 'new-char': openCharDialog(); break;
-    case 'new-loadout': openLoadoutDialog('new'); break;
-    case 'rename-loadout': openLoadoutDialog('rename'); break;
+    case 'new-loadout': openNameDialog('new-loadout'); break;
+    case 'rename-loadout': openNameDialog('rename-loadout'); break;
+    case 'new-phase': openNameDialog('new-phase'); break;
+    case 'rename-phase': openNameDialog('rename-phase'); break;
     case 'delete-loadout':
       if (lo && confirm(`Delete loadout “${lo.name}”? Item notes and obtained status are kept.`)) {
         ch.loadouts = ch.loadouts.filter((l) => l.id !== lo.id);
@@ -433,19 +487,26 @@ app.addEventListener('click', (e) => {
         renderAll();
       }
       break;
+    case 'delete-phase':
+      if (ph && confirm(`Delete phase “${ph.name}” from ALL loadouts on ALL characters? Item notes and obtained status are kept.`)) {
+        deletePhase(ph);
+        renderAll();
+      }
+      break;
     case 'pick-loadout': setActiveLoadout(ch, id); renderAll(); break;
+    case 'pick-phase': setActivePhase(id); renderAll(); break;
     case 'add-item': openAddItemDialog(slot); break;
-    case 'remove-item': removeItemFromSlot(ch, lo, slot, itemId); renderAll(); break;
-    case 'move-up': moveItemInSlot(lo, slot, itemId, -1); renderAll(); break;
-    case 'move-down': moveItemInSlot(lo, slot, itemId, +1); renderAll(); break;
+    case 'remove-item': removeItemFromSlot(ch, lo, ph, slot, itemId); renderAll(); break;
+    case 'move-up': moveItemInSlot(lo, ph, slot, itemId, -1); renderAll(); break;
+    case 'move-down': moveItemInSlot(lo, ph, slot, itemId, +1); renderAll(); break;
     case 'toggle-note': {
-      const key = `${lo.id}/${slot}/${itemId}`;
+      const key = `${lo.id}/${ph.id}/${slot}/${itemId}`;
       openNotes.has(key) ? openNotes.delete(key) : openNotes.add(key);
       renderAll();
       break;
     }
     case 'refresh-item':
-      fetchItem(ch.version, itemId).then((item) => {
+      fetchItem(itemId).then((item) => {
         Object.assign(ch.items[itemId], item);
         save();
         renderAll();

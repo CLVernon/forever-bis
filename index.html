@@ -58,9 +58,6 @@
     <label>Class
       <select name="cls"></select>
     </label>
-    <label>Game version <span class="hint">(controls which Wowhead database is used)</span>
-      <select name="version"></select>
-    </label>
     <div class="dialog-actions">
       <button type="button" class="btn btn-ghost" data-close>Cancel</button>
       <button type="submit" class="btn btn-primary" value="ok">Save</button>
@@ -68,13 +65,14 @@
   </form>
 </dialog>
 
-<!-- Loadout create/rename -->
-<dialog id="loadoutDialog">
-  <form method="dialog" id="loadoutForm">
-    <h2 id="loadoutDialogTitle">New loadout</h2>
+<!-- Loadout / phase create & rename -->
+<dialog id="nameDialog">
+  <form method="dialog" id="nameForm">
+    <h2 id="nameDialogTitle">New loadout</h2>
     <label>Name
       <input name="name" required maxlength="40" placeholder="Enhancement" autocomplete="off">
     </label>
+    <p class="hint" id="nameDialogHint" hidden>Phases are global — this phase is added to every loadout on every character.</p>
     <div class="dialog-actions">
       <button type="button" class="btn btn-ghost" data-close>Cancel</button>
       <button type="submit" class="btn btn-primary" value="ok">Save</button>
