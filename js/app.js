@@ -213,6 +213,16 @@ function progressHtml(ch, lo, ph) {
 
 // ---- Gear slots view ------------------------------------------------------
 
+// Representative (grayscaled) classic icons used as slot glyphs.
+const SLOT_GLYPHS = {
+  head: 'inv_helmet_03', neck: 'inv_jewelry_necklace_03', shoulder: 'inv_shoulder_01',
+  back: 'inv_misc_cape_02', chest: 'inv_chest_chain', wrist: 'inv_bracer_02',
+  hands: 'inv_gauntlets_04', waist: 'inv_belt_04', legs: 'inv_pants_02',
+  feet: 'inv_boots_02', finger: 'inv_jewelry_ring_03', trinket: 'inv_misc_pocketwatch_01',
+  twohand: 'inv_axe_04', mainhand: 'inv_sword_04', offhand: 'inv_shield_04',
+  ranged: 'inv_weapon_bow_02',
+};
+
 function slotsHtml(ch, lo, ph) {
   const ro = isReadOnly();
   const slots = slotsOf(lo, ph);
@@ -225,16 +235,21 @@ function slotsHtml(ch, lo, ph) {
     const items = shown.map((id) =>
       itemRowHtml(ch, lo, ph, s.key, id, all.indexOf(id), all.length)).join('');
     const hiddenCount = all.length - shown.length;
-    const empty = all.length === 0
-      ? '<p class="slot-empty">No goals yet</p>'
-      : (shown.length === 0 ? `<p class="slot-empty">All ${all.length} obtained ✓</p>` : '');
+    const got = all.filter((id) => ch.items[id]?.obtained).length;
+    const isEmpty = all.length === 0;
+    const body = isEmpty
+      ? (ro ? '<p class="slot-empty">No goals</p>'
+            : `<button class="slot-add-big" data-action="add-item" data-slot="${s.key}">+ Add a goal item</button>`)
+      : (shown.length === 0 ? `<p class="slot-empty">All ${all.length} obtained ✓</p>` : items);
     return `
-      <article class="slot-card ${all.some((id) => ch.items[id]?.obtained) ? 'slot-done' : ''}">
+      <article class="slot-card ${got > 0 ? 'slot-done' : ''} ${isEmpty ? 'slot-blank' : ''}">
         <header class="slot-head">
+          <img class="slot-glyph" src="${iconUrl(SLOT_GLYPHS[s.key], 'small')}" alt="" loading="lazy" onerror="this.hidden=true">
           <h3>${s.label}</h3>
-          ${ro ? '' : `<button class="icon-btn add" data-action="add-item" data-slot="${s.key}" title="Add goal item to ${s.label}">+</button>`}
+          ${all.length ? `<span class="slot-count ${got === all.length ? 'all' : got > 0 ? 'some' : ''}">${got}/${all.length}</span>` : ''}
+          ${!isEmpty && !ro ? `<button class="icon-btn add" data-action="add-item" data-slot="${s.key}" title="Add goal item to ${s.label}">+</button>` : ''}
         </header>
-        ${items}${empty}
+        ${body}
         ${hiddenCount > 0 && shown.length > 0 ? `<p class="slot-empty">+ ${hiddenCount} obtained hidden</p>` : ''}
         ${enchantHtml(lo, ph, s.key, enchants[s.key])}
       </article>`;
@@ -311,7 +326,10 @@ function itemRowHtml(ch, lo, ph, slotKey, itemId, index, count) {
       </label>
       <a class="item-link" href="${itemUrl(itemId)}" target="_blank" rel="noopener"
          data-wh-icon-size="medium">
-        <img class="item-icon" src="${iconUrl(item.icon)}" alt="" loading="lazy">
+        <span class="icon-wrap" style="--q:${qColor(item.quality)}">
+          <img class="item-icon" src="${iconUrl(item.icon)}" alt="" loading="lazy">
+          ${item.obtained ? '<span class="icon-check">✓</span>' : ''}
+        </span>
         <span class="item-name" style="color:${qColor(item.quality)}">${esc(item.name)}</span>
       </a>
       ${index === 0 && count > 1 ? '<span class="bis-chip" title="Top priority for this slot">BIS</span>' : ''}
@@ -349,7 +367,9 @@ function neededItemRowHtml(entry, chanceLabel) {
           <span class="obtain-box"></span>
         </label>
         <a class="item-link" href="${itemUrl(item.id)}" target="_blank" rel="noopener" data-wh-icon-size="medium">
-          <img class="item-icon" src="${iconUrl(item.icon)}" alt="" loading="lazy">
+          <span class="icon-wrap" style="--q:${qColor(item.quality)}">
+            <img class="item-icon" src="${iconUrl(item.icon)}" alt="" loading="lazy">
+          </span>
           <span class="item-name" style="color:${qColor(item.quality)}">${esc(item.name)}</span>
         </a>
         ${chanceLabel ? `<span class="chance-chip">${esc(chanceLabel)}</span>` : ''}

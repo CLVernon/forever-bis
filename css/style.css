@@ -25,6 +25,15 @@ html, body {
   font: 15px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif;
 }
 
+body {
+  background:
+    radial-gradient(1100px 500px at 50% -150px, #2a2113 0%, transparent 70%),
+    radial-gradient(900px 600px at 110% 100%, #1c160d 0%, transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+
 a { color: var(--gold-bright); }
 
 /* ---- Top bar ---- */
@@ -254,18 +263,28 @@ select:focus, input:focus, textarea:focus {
 
 .slot-card {
   min-width: 0; /* let long item names shrink instead of widening the grid */
-  background: var(--bg-card);
+  background: linear-gradient(170deg, #292115 0%, var(--bg-card) 28%);
   border: 1px solid var(--border);
+  border-top-color: #4a3e26;
   border-radius: var(--radius);
-  padding: 10px 12px;
+  padding: 9px 12px 10px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.25);
+  transition: border-color .15s, box-shadow .15s;
 }
-.slot-card.slot-done { border-color: #3f5a35; }
+.slot-card:hover {
+  border-color: #5a4b2d;
+  box-shadow: 0 4px 14px rgba(0,0,0,.35);
+}
+.slot-card.slot-done { border-left: 3px solid #4d7a40; padding-left: 10px; }
+.slot-card.slot-blank { opacity: .85; }
 
 .slot-head {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 6px;
+  gap: 8px;
+  margin: 0 0 7px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid #2d2618;
 }
 .slot-head h3 {
   margin: 0;
@@ -274,15 +293,54 @@ select:focus, input:focus, textarea:focus {
   letter-spacing: 1.2px;
   color: var(--gold);
 }
+.slot-glyph {
+  width: 20px; height: 20px;
+  border-radius: 4px;
+  filter: grayscale(1) brightness(.85);
+  opacity: .8;
+  flex: none;
+}
+.slot-count {
+  font-size: 11px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 0 7px;
+  line-height: 16px;
+}
+.slot-count.some { color: var(--gold-bright); border-color: #5a4a28; }
+.slot-count.all { color: var(--ok); border-color: #3f5a35; }
+.slot-head .icon-btn.add { margin-left: auto; }
+
+.slot-add-big {
+  display: block;
+  width: 100%;
+  background: none;
+  border: 1px dashed #453a24;
+  border-radius: 8px;
+  color: #6b6250;
+  font: inherit;
+  font-size: 13px;
+  padding: 10px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.slot-add-big:hover { color: var(--gold); border-color: var(--gold); }
+
 .slot-empty { margin: 2px 0 4px; font-size: 13px; color: #5f5747; font-style: italic; }
 
 /* ---- Item rows ---- */
 
 .item-row {
   border-top: 1px solid #2d2618;
-  padding: 6px 0;
+  padding: 6px 6px;
+  margin: 0 -6px;
+  border-radius: 6px;
+  transition: background .12s;
 }
 .item-row:first-of-type { border-top: 0; }
+.item-row:hover { background: rgba(255, 220, 140, .04); }
+.item-row.obtained { background: rgba(88, 194, 106, .05); }
 
 .item-main { display: flex; align-items: center; gap: 8px; min-height: 32px; }
 
@@ -318,13 +376,31 @@ select:focus, input:focus, textarea:focus {
   min-width: 0;
   overflow: hidden;
 }
+.icon-wrap {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+}
 .item-icon {
-  width: 28px; height: 28px;
-  border-radius: 5px;
-  border: 1px solid #000;
-  box-shadow: 0 0 0 1px #4a3f28;
+  width: 30px; height: 30px;
+  border-radius: 6px;
+  border: 2px solid var(--q, #4a3f28); /* classic quality-colored frame */
+  box-shadow: 0 0 6px -1px var(--q, transparent), inset 0 0 0 1px #000;
   flex: none;
   background: #000;
+}
+.icon-check {
+  position: absolute;
+  right: -5px; bottom: -5px;
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  background: #2f4d2a;
+  border: 1px solid var(--ok);
+  color: var(--ok);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
 }
 .item-name {
   font-weight: 600;
@@ -334,8 +410,8 @@ select:focus, input:focus, textarea:focus {
 }
 .item-link:hover .item-name { text-decoration: underline; }
 
-.item-row.obtained .item-name { opacity: .55; }
-.item-row.obtained .item-icon { opacity: .55; filter: grayscale(.4); }
+.item-row.obtained .item-name { opacity: .6; }
+.item-row.obtained .item-icon { opacity: .7; filter: grayscale(.35); box-shadow: inset 0 0 0 1px #000; }
 
 .bis-chip, .sync-chip {
   flex: none;
@@ -418,7 +494,7 @@ select:focus, input:focus, textarea:focus {
 /* ---- Item source line ---- */
 
 .item-source {
-  margin: 2px 0 2px 54px;
+  margin: 2px 0 2px 60px;
   font-size: 12px;
   color: #8d8368;
 }
