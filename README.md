@@ -46,12 +46,14 @@ notes stay in sync across every loadout and phase that shares the item.
   tooltip API, and hovering an item shows the full Wowhead tooltip. If a lookup
   fails (offline, blocked), the item is still added and can be refreshed later
   with ↻.
-- **Sync between devices** — ⋯ → *Sync between devices* connects the tracker to
-  a secret GitHub gist in your own account (one gist-scope token, pasted once
-  per device). Changes upload automatically a few seconds after you make them,
-  other devices pull the latest on load, and if two devices diverge nothing is
-  overwritten — you pick a winner in the sync dialog. The token is stored only
-  in the browser, never in backups or share links.
+- **Move data between devices** — ⋯ → *Sync between devices*:
+  - **Quick transfer (no accounts):** create a link that carries your whole
+    tracker, open it on the other device (or scan the QR code with your
+    phone) — it asks before replacing anything and offers Undo.
+  - **Automatic sync (optional):** connect a secret GitHub gist in your own
+    account (one gist-scope token, pasted once per device). Changes upload
+    automatically, other devices pull on load, and divergence is never
+    resolved silently.
 - **Local & private** — everything is stored in your browser's `localStorage`.
   Use **⋯ → Export backup** for a JSON backup, and **Import backup** to restore
   it anywhere.

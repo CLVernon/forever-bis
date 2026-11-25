@@ -836,6 +836,44 @@ function setSyncStatus(msg, kind = 'info') {
   }
 }
 
+function gistSectionHtml(cfg) {
+  if (!cfg) {
+    return `
+      <p class="hint">For hands-off syncing: changes upload automatically and other devices
+         pull them on load, through a <b>secret gist</b> in your own GitHub account.</p>
+      <ol class="sync-steps">
+        <li><a href="https://github.com/settings/tokens/new?scopes=gist&description=Forever%20BIS%20sync"
+               target="_blank" rel="noopener">Create a GitHub token</a>
+            (the <b>gist</b> scope is pre-selected — leave everything else off; pick a long expiration).</li>
+        <li>Copy the token and paste it below.</li>
+        <li>Paste the <em>same token</em> on your other devices — they find the same data automatically.</li>
+      </ol>
+      <label>GitHub token
+        <input id="syncToken" type="password" placeholder="ghp_…" autocomplete="off">
+      </label>
+      <p class="hint">The token is stored only in this browser and is never part of backups or share links.
+         It can do nothing on GitHub except read/write gists.</p>
+      <div class="dialog-actions" style="justify-content:flex-start">
+        <button class="btn btn-primary" data-sync="connect">Connect</button>
+      </div>`;
+  }
+  const dirty = localChanged(cfg);
+  return `
+    <p class="sync-connected">✓ Connected — data syncs through a
+       <a href="${esc(cfg.gistUrl ?? '#')}" target="_blank" rel="noopener">secret gist</a> on your GitHub.</p>
+    <ul class="sync-meta hint">
+      <li>Changes on this device upload automatically a few seconds after you make them.</li>
+      <li>Cloud changes from other devices are pulled in when the app loads.</li>
+      <li>This device: ${dirty ? 'has changes not yet uploaded' : 'matches the last sync'}.</li>
+    </ul>
+    <div class="sync-choice">
+      <button class="btn btn-primary" data-sync="sync-now">Sync now</button>
+      <button class="btn" data-sync="upload" title="Overwrite the cloud with this device's data">Force upload</button>
+      <button class="btn" data-sync="download" title="Overwrite this device with the cloud data">Force download</button>
+      <button class="btn btn-ghost danger" data-sync="disconnect">Disconnect</button>
+    </div>`;
+}
+
 function renderSyncDialog() {
   const cfg = syncConfig();
   const body = $('#syncBody');
@@ -852,44 +890,68 @@ function renderSyncDialog() {
       <div id="syncStatus" class="add-status" hidden></div>`;
     return;
   }
-  if (!cfg) {
-    body.innerHTML = `
-      <p>Keep your tracker identical on every device using a <b>secret GitHub gist</b>
-         — no account system, your data stays in your own GitHub.</p>
-      <ol class="sync-steps">
-        <li><a href="https://github.com/settings/tokens/new?scopes=gist&description=Forever%20BIS%20sync"
-               target="_blank" rel="noopener">Create a GitHub token</a>
-            (the <b>gist</b> scope is pre-selected — leave everything else off; pick a long expiration).</li>
-        <li>Copy the token and paste it below.</li>
-        <li>Paste the <em>same token</em> on your other devices — they find the same data automatically.</li>
-      </ol>
-      <label>GitHub token
-        <input id="syncToken" type="password" placeholder="ghp_…" autocomplete="off">
-      </label>
-      <p class="hint">The token is stored only in this browser and is never part of backups or share links.
-         It can do nothing on GitHub except read/write gists.</p>
-      <div class="dialog-actions" style="justify-content:flex-start">
-        <button class="btn btn-primary" data-sync="connect">Connect</button>
-      </div>
-      <div id="syncStatus" class="add-status" hidden></div>`;
-    return;
-  }
-  const dirty = localChanged(cfg);
   body.innerHTML = `
-    <p class="sync-connected">✓ Connected — data syncs through a
-       <a href="${esc(cfg.gistUrl ?? '#')}" target="_blank" rel="noopener">secret gist</a> on your GitHub.</p>
-    <ul class="sync-meta hint">
-      <li>Changes on this device upload automatically a few seconds after you make them.</li>
-      <li>Cloud changes from other devices are pulled in when the app loads.</li>
-      <li>This device: ${dirty ? 'has changes not yet uploaded' : 'matches the last sync'}.</li>
-    </ul>
-    <div class="sync-choice">
-      <button class="btn btn-primary" data-sync="sync-now">Sync now</button>
-      <button class="btn" data-sync="upload" title="Overwrite the cloud with this device's data">Force upload</button>
-      <button class="btn" data-sync="download" title="Overwrite this device with the cloud data">Force download</button>
-      <button class="btn btn-ghost danger" data-sync="disconnect">Disconnect</button>
-    </div>
+    <section>
+      <h3 class="sync-h">Quick transfer <span class="hint">(no accounts needed)</span></h3>
+      <p class="hint">Create a link that carries your whole tracker — every character, phase and
+         note. Open it on the other device (send it to yourself however you like, or scan the
+         QR code with your phone) and that device takes over this snapshot.</p>
+      <div class="sync-choice">
+        <button class="btn btn-primary" data-sync="make-transfer">Create transfer link</button>
+      </div>
+      <div id="transferOut" hidden>
+        <label>Transfer link
+          <input id="transferUrl" readonly>
+        </label>
+        <div class="dialog-actions" style="justify-content:flex-start">
+          <button class="btn" data-sync="copy-transfer" id="copyTransferBtn">Copy link</button>
+        </div>
+        <div id="transferQr" class="transfer-qr"></div>
+        <p class="hint">Opening the link asks before replacing the other device's data, and
+           offers Undo. The link is a snapshot — create a fresh one after further changes.</p>
+      </div>
+    </section>
+    <hr>
+    <details class="gist-sec" ${cfg ? 'open' : ''}>
+      <summary>Automatic sync <span class="hint">(optional — uses a free GitHub account)</span></summary>
+      ${gistSectionHtml(cfg)}
+    </details>
     <div id="syncStatus" class="add-status" hidden></div>`;
+}
+
+// ---- Quick transfer (full-state link + QR, no accounts) --------------------
+
+let qrLibPromise = null;
+function loadQrLib() {
+  if (window.QRCode) return Promise.resolve();
+  if (!qrLibPromise) {
+    qrLibPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+      s.onload = resolve;
+      s.onerror = () => { qrLibPromise = null; reject(new Error('QR lib unavailable')); };
+      document.head.appendChild(s);
+    });
+  }
+  return qrLibPromise;
+}
+
+async function makeTransferLink() {
+  const payload = await encodeShare({ v: 2, kind: 'transfer', state: JSON.parse(stateJson()) });
+  const url = `${location.href.split('#')[0]}#transfer=${payload}`;
+  $('#transferOut').hidden = false;
+  $('#transferUrl').value = url;
+  const qrBox = $('#transferQr');
+  qrBox.innerHTML = '';
+  if (url.length <= 2300) {
+    try {
+      await loadQrLib();
+      // eslint-disable-next-line no-undef
+      new QRCode(qrBox, { text: url, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.L });
+    } catch { /* QR is a nicety; the link works without it */ }
+  } else {
+    qrBox.innerHTML = '<p class="hint">Too much data for a QR code — copy the link instead.</p>';
+  }
 }
 
 function openSyncDialog() {
@@ -952,6 +1014,21 @@ async function handleSyncAction(action) {
   const cfg = syncConfig();
   try {
     switch (action) {
+      case 'make-transfer':
+        await makeTransferLink();
+        break;
+      case 'copy-transfer': {
+        const input = $('#transferUrl');
+        input.select();
+        try {
+          await navigator.clipboard.writeText(input.value);
+          $('#copyTransferBtn').textContent = 'Copied ✓';
+          setTimeout(() => { const b = $('#copyTransferBtn'); if (b) b.textContent = 'Copy link'; }, 1500);
+        } catch {
+          document.execCommand('copy'); // fallback; text is already selected
+        }
+        break;
+      }
       case 'connect': {
         const token = $('#syncToken').value.trim();
         if (!token) { setSyncStatus('Paste a token first.', 'warn'); break; }
@@ -1428,9 +1505,32 @@ app.addEventListener('keydown', (e) => {
   }
 });
 
+// A transfer/share link pasted into an already-open tab only changes the
+// hash; reload so boot() processes it.
+window.addEventListener('hashchange', () => {
+  if (/^#(transfer|share)=/.test(location.hash)) location.reload();
+});
+
 // ---- Boot ---------------------------------------------------------------
 
 async function boot() {
+  // Device-transfer link: import the full snapshot after an explicit OK.
+  const tm = location.hash.match(/^#transfer=(.+)$/);
+  if (tm) {
+    history.replaceState(null, '', location.pathname + location.search);
+    try {
+      const data = await decodeShare(tm[1]);
+      if (data?.kind !== 'transfer' || !data.state) throw new Error('bad payload');
+      const n = (data.state.characters ?? []).length;
+      if (confirm(`Import tracker data from your other device (${n} character${n === 1 ? '' : 's'})?\n\nThis replaces the data on THIS device. You can undo right afterwards.`)) {
+        withUndo('Imported data from your other device.', () => replaceState(data.state));
+      }
+    } catch (e) {
+      console.error('Could not open transfer link', e);
+      alert('Sorry — that transfer link could not be opened. Make sure the whole link was copied.');
+    }
+  }
+
   const m = location.hash.match(/^#share=(.+)$/);
   if (m) {
     try {
