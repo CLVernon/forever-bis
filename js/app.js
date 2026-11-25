@@ -137,18 +137,14 @@ function renderMain() {
     body = slotsHtml(ch, lo, ph);
   }
 
-  // In the paper-doll slots view the center panel carries the name and
-  // progress, so the separate header would be duplication.
-  const showHead = !(view === 'slots' && lo && ph);
   app.innerHTML = banner + `
-    ${showHead ? `
     <section class="char-head">
       <div class="char-id">
         <h2 style="color:${cls.color}">${esc(ch.name)}</h2>
         <span class="char-sub">${esc([ch.race, cls.label !== 'Other' ? cls.label : ''].filter(Boolean).join(' '))}</span>
       </div>
       ${lo && ph ? progressHtml(ch, lo, ph) : ''}
-    </section>` : ''}
+    </section>
 
     ${viewSwitchHtml()}
 
@@ -227,17 +223,11 @@ const SLOT_GLYPHS = {
   ranged: 'inv_weapon_bow_02',
 };
 
-// Paper-doll arrangement: armor flanks a central character panel, weapons
-// sit beneath it — like the in-game character sheet.
-const PD_LEFT = ['head', 'neck', 'shoulder', 'back', 'chest', 'wrist'];
-const PD_RIGHT = ['hands', 'waist', 'legs', 'feet', 'finger', 'trinket'];
-const PD_CENTER = ['twohand', 'mainhand', 'offhand', 'ranged'];
-
 function slotsHtml(ch, lo, ph) {
   const ro = isReadOnly();
   const slots = slotsOf(lo, ph);
   const enchants = enchantsOf(lo, ph);
-  const cardFor = (s) => {
+  const cards = SLOTS.map((s) => {
     const all = slots[s.key];
     const shown = state.hideObtained && !ro
       ? all.filter((id) => !ch.items[id]?.obtained)
@@ -263,25 +253,8 @@ function slotsHtml(ch, lo, ph) {
         ${hiddenCount > 0 && shown.length > 0 ? `<p class="slot-empty">+ ${hiddenCount} obtained hidden</p>` : ''}
         ${enchantHtml(lo, ph, s.key, enchants[s.key])}
       </article>`;
-  };
-  const card = (key) => cardFor(SLOTS.find((s) => s.key === key));
-  const cls = CLASSES[ch.cls];
-  const panel = `
-    <div class="pd-panel" style="--cls:${cls.color}">
-      <div class="pd-emblem">${esc((ch.name.trim()[0] ?? '?').toUpperCase())}</div>
-      <div class="char-id pd-id">
-        <h2 class="pd-name" style="color:${cls.color}">${esc(ch.name)}</h2>
-        <span class="char-sub">${esc([ch.race, cls.label !== 'Other' ? cls.label : ''].filter(Boolean).join(' '))}</span>
-      </div>
-      <span class="pd-context">${esc(lo.name)} · ${esc(ph.name)}</span>
-      ${progressHtml(ch, lo, ph)}
-    </div>`;
-  return `
-    <section class="slots paperdoll">
-      <div class="pd-col pd-left">${PD_LEFT.map(card).join('')}</div>
-      <div class="pd-col pd-center">${panel}${PD_CENTER.map(card).join('')}</div>
-      <div class="pd-col pd-right">${PD_RIGHT.map(card).join('')}</div>
-    </section>`;
+  }).join('');
+  return `<section class="slots">${cards}</section>`;
 }
 
 function enchantHtml(lo, ph, slotKey, ench) {
