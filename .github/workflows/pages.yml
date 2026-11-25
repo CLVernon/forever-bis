@@ -36,6 +36,11 @@ jobs:
         with:
           path: .
 
+      # The artifacts API is eventually consistent; deploy-pages sometimes
+      # sees "0 artifacts" when it queries immediately after the upload.
+      - name: Let the artifact settle
+        run: sleep 15
+
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
